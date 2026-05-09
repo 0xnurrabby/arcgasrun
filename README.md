@@ -50,23 +50,23 @@ GasRun is an onchain car game built as a Farcaster mini app on the Base network.
 
 ## `{ features }`
 
-![](https://img.shields.io/badge/âœ“-Lane_Runner_Car_Game_(browser,_no_install)-B8F0D8?style=flat-square&labelColor=1a1a1a)
+![](https://img.shields.io/badge/FEAT-Lane_Runner_Car_Game_(browser,_no_install)-B8F0D8?style=flat-square&labelColor=1a1a1a)
 
-![](https://img.shields.io/badge/âœ“-Farcaster_Mini_App_(playable_inside_Warpcast)-B3D9FF?style=flat-square&labelColor=1a1a1a)
+![](https://img.shields.io/badge/FEAT-Farcaster_Mini_App_(playable_inside_Warpcast)-B3D9FF?style=flat-square&labelColor=1a1a1a)
 
-![](https://img.shields.io/badge/âœ“-Onchain_Score_Commits_on_Base_Mainnet-FFF4A8?style=flat-square&labelColor=1a1a1a)
+![](https://img.shields.io/badge/FEAT-Onchain_Score_Commits_on_Base_Mainnet-FFF4A8?style=flat-square&labelColor=1a1a1a)
 
-![](https://img.shields.io/badge/âœ“-Weekly_&_All--time_Global_Leaderboard-FFD4A8?style=flat-square&labelColor=1a1a1a)
+![](https://img.shields.io/badge/FEAT-Weekly_%26_All--time_Global_Leaderboard-FFD4A8?style=flat-square&labelColor=1a1a1a)
 
-![](https://img.shields.io/badge/âœ“-WalletConnect_+_Injected_Wallet_Support-FFB3D9?style=flat-square&labelColor=1a1a1a)
+![](https://img.shields.io/badge/FEAT-WalletConnect_%2B_Injected_Wallet_Support-FFB3D9?style=flat-square&labelColor=1a1a1a)
 
-![](https://img.shields.io/badge/âœ“-ERC--8021_Builder_Attribution-FFB3B3?style=flat-square&labelColor=1a1a1a)
+![](https://img.shields.io/badge/FEAT-ERC--8021_Builder_Attribution-FFB3B3?style=flat-square&labelColor=1a1a1a)
 
-![](https://img.shields.io/badge/âœ“-Paymaster_/_Gasless_Transaction_Support-D4B3FF?style=flat-square&labelColor=1a1a1a)
+![](https://img.shields.io/badge/FEAT-Paymaster_/_Gasless_Transaction_Support-D4B3FF?style=flat-square&labelColor=1a1a1a)
 
-![](https://img.shields.io/badge/âœ“-Redis--cached_Leaderboard_(instant_load)-B8F0D8?style=flat-square&labelColor=1a1a1a)
+![](https://img.shields.io/badge/FEAT-Redis--cached_Leaderboard_(instant_load)-B8F0D8?style=flat-square&labelColor=1a1a1a)
 
-![](https://img.shields.io/badge/âœ“-Live_at_gasrun.online-B3D9FF?style=flat-square&labelColor=1a1a1a)
+![](https://img.shields.io/badge/FEAT-Live_at_gasrun.online-B3D9FF?style=flat-square&labelColor=1a1a1a)
 
 ---
 
@@ -109,20 +109,20 @@ https://www.gasrun.online
 
 ```
 GasRun/
-â”œâ”€â”€ api/
-â”‚   â”œâ”€â”€ leaderboard.js     # Weekly/all-time leaderboard (onchain + Redis cache)
-â”‚   â”œâ”€â”€ paymaster.js       # Gasless tx paymaster endpoint
-â”‚   â”œâ”€â”€ share.js           # Share card generator
-â”‚   â””â”€â”€ cron/              # Scheduled leaderboard cache refresh
-â”œâ”€â”€ src/
-â”‚   â”œâ”€â”€ main.js            # Full game engine + wallet + onchain logic
-â”‚   â””â”€â”€ styles.css         # Game UI styles
-â”œâ”€â”€ assets/                # Game sprites, icons, OG images
-â”œâ”€â”€ .well-known/           # Farcaster app manifest
-â”œâ”€â”€ index.html             # Mini App entry point
-â”œâ”€â”€ maintenance.html       # Maintenance page
-â”œâ”€â”€ middleware.js          # Vercel edge middleware
-â””â”€â”€ package.json
+|-- api/
+|   |-- leaderboard.js     # Weekly/all-time leaderboard (onchain + Redis cache)
+|   |-- paymaster.js       # Gasless tx paymaster endpoint
+|   |-- share.js           # Share card generator
+|   +-- cron/              # Scheduled leaderboard cache refresh
+|-- src/
+|   |-- main.js            # Full game engine + wallet + onchain logic
+|   +-- styles.css         # Game UI styles
+|-- assets/                # Game sprites, icons, OG images
+|-- .well-known/           # Farcaster app manifest
+|-- index.html             # Mini App entry point
+|-- maintenance.html       # Maintenance page
+|-- middleware.js          # Vercel edge middleware
++-- package.json
 ```
 
 ---
