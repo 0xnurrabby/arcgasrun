@@ -284,7 +284,7 @@ const SCORE_CONTRACT = (window.__GASRUN_CONTRACTS && window.__GASRUN_CONTRACTS.s
 const VAULT_CONTRACT = (window.__GASRUN_CONTRACTS && window.__GASRUN_CONTRACTS.vault) || "0x0000000000000000000000000000000000000000";
 const CONTRACT = SCORE_CONTRACT;
 const POINTS_PER_USDC = 1000;
-const MIN_WITHDRAW_USDC = 1;
+const MIN_WITHDRAW_USDC = 0.1;
 
 // Builder Code (optional attribution)
 const BUILDER_CODE = "bc_ox3c2ez4";
@@ -1158,24 +1158,24 @@ async function withdrawUsdc() {
   await refreshServerBalance();
   const bal = Number(serverUsdcBalance || 0);
   if (bal < MIN_WITHDRAW_USDC) {
-    toast("Need at least 1.0 permanent USDC to withdraw");
+    toast("Need at least 0.1 permanent USDC to withdraw");
     return;
   }
-  const raw = prompt(`Withdraw USDC to your wallet (min 1, max ${bal}):`, String(Math.floor(bal)));
+  const raw = prompt(`Withdraw USDC to your wallet (min 0.1, max ${bal}):`, String(Math.min(bal, Math.max(0.1, Number(bal.toFixed(1))))));
   if (raw == null) return;
-  const amount = Math.floor(Number(raw));
+  const amount = Math.round(Number(raw) * 1e6) / 1e6;
   if (!Number.isFinite(amount) || amount < MIN_WITHDRAW_USDC) {
-    toast("Invalid amount (min 1 USDC)");
+    toast("Invalid amount (min 0.1 USDC)");
     return;
   }
-  if (amount > Math.floor(bal)) {
+  if (amount > bal + 1e-9) {
     toast("Amount exceeds permanent USDC balance");
     return;
   }
 
   try {
     toast("Sign withdraw…", 1500);
-    const usdcMicros = String(amount * 1_000_000);
+    const usdcMicros = String(Math.round(amount * 1_000_000));
     const timestamp = Date.now();
     const message = `gasrun:withdraw:${account.toLowerCase()}:${usdcMicros}:${timestamp}`;
     const signature = await signGasrunMessage(message);
@@ -2008,7 +2008,7 @@ function openMainMenu() {
       <div class="kv"><div class="k">Permanent USDC</div><div class="v">${serverUsdcBalance}</div></div>
       <div class="kv"><div class="k">Coins</div><div class="v">${Math.floor(profile.coins)} (→ ${Math.floor(profile.coins) * 10} pts)</div></div>
       <div class="kv"><div class="k">⚠️Saved points deduction</div><div class="v">-25% every 10 min</div></div>
-      <div class="kv"><div class="k">Rate</div><div class="v">1000 pts = 1 USDC · min wd 1 USDC</div></div>
+      <div class="kv"><div class="k">Rate</div><div class="v">1000 pts = 1 USDC · min wd 0.1 USDC</div></div>
     </div>
 
     <div class="btnRow">

@@ -97,7 +97,7 @@ function weekStartUtcMs(now = Date.now()) {
 const POINTS_PER_USDC = 1000;
 const USDC_DECIMALS = 6;
 const USDC_MICROS_PER_UNIT = 10 ** USDC_DECIMALS;
-const MIN_WITHDRAW_MICROS = USDC_MICROS_PER_UNIT; // 1 USDC
+const MIN_WITHDRAW_MICROS = 100_000; // 0.1 USDC
 
 function pointsToUsdcMicros(points) {
   const p = BigInt(Math.floor(Number(points) || 0));

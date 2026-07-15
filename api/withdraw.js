@@ -32,10 +32,7 @@ module.exports = async function handler(req, res) {
 
     if (!/^0x[a-f0-9]{40}$/.test(address)) return fail(res, 400, "Invalid address");
     if (usdcMicros < BigInt(MIN_WITHDRAW_MICROS)) {
-      return fail(res, 400, "Minimum withdraw is 1 USDC");
-    }
-    if (usdcMicros % BigInt(USDC_MICROS_PER_UNIT) !== 0n) {
-      return fail(res, 400, "Withdraw whole USDC only (min 1)");
+      return fail(res, 400, "Minimum withdraw is 0.1 USDC");
     }
     if (!signature) return fail(res, 400, "Signature required");
     if (!timestamp || Math.abs(Date.now() - timestamp) > 10 * 60 * 1000) {

@@ -31,7 +31,7 @@ module.exports = async function handler(req, res) {
       },
       rates: {
         pointsPerUsdc: POINTS_PER_USDC,
-        minWithdrawUsdc: "1.000000",
+        minWithdrawUsdc: "0.100000",
         minWithdrawMicros: String(MIN_WITHDRAW_MICROS),
       },
     });
