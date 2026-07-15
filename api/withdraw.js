@@ -8,12 +8,13 @@ const {
   USDC_MICROS_PER_UNIT,
 } = require("./lib/db");
 const { verifyMessage, parseJsonBody, ok, fail, cors } = require("./lib/auth");
-const { payoutUsdc, vaultBalance, loadDeployed } = require("./lib/chain");
+const { payoutUsdc, vaultBalance, loadDeployed, onChainCredit } = require("./lib/chain");
 
 /**
- * Instant USDC withdraw via GasRunVault
- * Body: { address, usdc (number, whole units) OR usdcMicros, timestamp, signature }
- * Message: gasrun:withdraw:{address}:{usdcMicros}:{timestamp}
+ * POST /api/withdraw
+ * body.action:
+ *  - "confirm" → after user on-chain withdraw() tx
+ *  - default   → operator payout path (legacy)
  */
 module.exports = async function handler(req, res) {
   cors(res);
@@ -23,10 +24,54 @@ module.exports = async function handler(req, res) {
   try {
     await ensureSchema();
     const body = parseJsonBody(req);
+    const action = String(body.action || "payout");
+
+    if (action === "confirm") {
+      const address = normAddr(body.address);
+      const usdcMicros = BigInt(body.usdcMicros || 0);
+      const txHash = body.txHash || null;
+      if (!/^0x[a-f0-9]{40}$/.test(address)) return fail(res, 400, "Invalid address");
+      if (usdcMicros <= 0n) return fail(res, 400, "Invalid amount");
+
+      const db = getSql();
+      await getOrCreateUser(address);
+      let chainCredit = "0";
+      try {
+        chainCredit = (await onChainCredit(address)).toString();
+        await db`
+          UPDATE users SET usdc_balance_micros = ${chainCredit}, updated_at = NOW()
+          WHERE address = ${address}
+        `;
+      } catch {
+        await db`
+          UPDATE users SET
+            usdc_balance_micros = GREATEST(usdc_balance_micros - ${usdcMicros.toString()}, 0),
+            updated_at = NOW()
+          WHERE address = ${address}
+        `;
+      }
+      const ref = `onchain-wd-${txHash || Date.now()}`;
+      await db`
+        INSERT INTO withdrawals (address, usdc_micros, status, ref, tx_hash, completed_at)
+        VALUES (${address}, ${usdcMicros.toString()}, 'completed', ${ref}, ${txHash}, NOW())
+        ON CONFLICT (ref) DO NOTHING
+      `;
+      const user = await getOrCreateUser(address);
+      return ok(res, {
+        txHash,
+        amount: usdcMicrosToDisplay(usdcMicros),
+        usdcBalance: usdcMicrosToDisplay(user.usdc_balance_micros),
+        usdcBalanceMicros: String(user.usdc_balance_micros),
+        explorer: txHash ? `https://testnet.arcscan.app/tx/${txHash}` : null,
+      });
+    }
+
+    // legacy operator payout
     const address = normAddr(body.address);
-    let usdcMicros = body.usdcMicros != null
-      ? BigInt(body.usdcMicros)
-      : BigInt(Math.floor(Number(body.usdc || 0) * USDC_MICROS_PER_UNIT));
+    let usdcMicros =
+      body.usdcMicros != null
+        ? BigInt(body.usdcMicros)
+        : BigInt(Math.floor(Number(body.usdc || 0) * USDC_MICROS_PER_UNIT));
     const timestamp = Number(body.timestamp || 0);
     const signature = body.signature;
 
@@ -40,12 +85,10 @@ module.exports = async function handler(req, res) {
     }
 
     const msg = `gasrun:withdraw:${address}:${usdcMicros.toString()}:${timestamp}`;
-    if (!verifyMessage(address, msg, signature)) {
-      return fail(res, 401, "Invalid signature");
-    }
+    if (!verifyMessage(address, msg, signature)) return fail(res, 401, "Invalid signature");
 
     const deployed = loadDeployed();
-    if (!deployed.vault && !process.env.VAULT_ADDRESS) {
+    if (!deployed.vault && !process.env.VAULT_ADDRESS && !process.env.CORE_ADDRESS) {
       return fail(res, 503, "Vault not deployed yet");
     }
 
@@ -58,7 +101,6 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Check vault liquidity
     const vBal = await vaultBalance();
     if (vBal < usdcMicros) {
       return fail(res, 503, "Vault underfunded — contact admin", {
@@ -67,8 +109,6 @@ module.exports = async function handler(req, res) {
     }
 
     const ref = `wd-${address.slice(2, 10)}-${timestamp}-${usdcMicros.toString()}`;
-
-    // Reserve balance first
     const reserved = await db`
       UPDATE users SET
         usdc_balance_micros = usdc_balance_micros - ${usdcMicros.toString()},
@@ -76,9 +116,7 @@ module.exports = async function handler(req, res) {
       WHERE address = ${address} AND usdc_balance_micros >= ${usdcMicros.toString()}
       RETURNING *
     `;
-    if (!reserved[0]) {
-      return fail(res, 400, "Insufficient balance (race)");
-    }
+    if (!reserved[0]) return fail(res, 400, "Insufficient balance (race)");
 
     await db`
       INSERT INTO withdrawals (address, usdc_micros, status, ref)
@@ -88,10 +126,7 @@ module.exports = async function handler(req, res) {
     try {
       const { txHash, ref: refBytes } = await payoutUsdc(address, usdcMicros.toString(), ref);
       await db`
-        UPDATE withdrawals SET
-          status = 'completed',
-          tx_hash = ${txHash},
-          completed_at = NOW()
+        UPDATE withdrawals SET status = 'completed', tx_hash = ${txHash}, completed_at = NOW()
         WHERE ref = ${ref}
       `;
       const updated = await getOrCreateUser(address);
@@ -105,7 +140,6 @@ module.exports = async function handler(req, res) {
         explorer: `https://testnet.arcscan.app/tx/${txHash}`,
       });
     } catch (txErr) {
-      // refund
       await db`
         UPDATE users SET
           usdc_balance_micros = usdc_balance_micros + ${usdcMicros.toString()},
@@ -113,9 +147,7 @@ module.exports = async function handler(req, res) {
         WHERE address = ${address}
       `;
       await db`
-        UPDATE withdrawals SET
-          status = 'failed',
-          error = ${String(txErr?.message || txErr)}
+        UPDATE withdrawals SET status = 'failed', error = ${String(txErr?.message || txErr)}
         WHERE ref = ${ref}
       `;
       return fail(res, 500, "On-chain payout failed: " + (txErr?.message || String(txErr)));

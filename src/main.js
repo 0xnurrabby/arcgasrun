@@ -1241,10 +1241,10 @@ async function convertPointsToUsdc() {
   try {
     toast("Preparing on-chain convert…", 1500);
     const addr = String(account).toLowerCase();
-    const prep = await fetch("/api/convert-voucher", {
+    const prep = await fetch("/api/convert", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ address: addr, points: usePts })
+      body: JSON.stringify({ action: "voucher", address: addr, points: usePts })
     }).then((r) => r.json());
     if (!prep?.ok) throw new Error(prep?.error || "Voucher failed");
 
@@ -1256,10 +1256,10 @@ async function convertPointsToUsdc() {
     toast("Waiting for confirmation…", 2000);
     await waitTxLight(txHash);
 
-    const conf = await fetch("/api/convert-confirm", {
+    const conf = await fetch("/api/convert", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ address: addr, points: usePts, txHash })
+      body: JSON.stringify({ action: "confirm", address: addr, points: usePts, txHash })
     }).then((r) => r.json());
     if (!conf?.ok) throw new Error(conf?.error || "Confirm failed");
 
@@ -1361,10 +1361,10 @@ async function confirmWithdrawUsdc(rawAmount) {
     toast("Waiting for confirmation…", 2000);
     await waitTxLight(txHash);
 
-    const j = await fetch("/api/withdraw-confirm", {
+    const j = await fetch("/api/withdraw", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ address: addr, usdcMicros, txHash })
+      body: JSON.stringify({ action: "confirm", address: addr, usdcMicros, txHash })
     }).then((r) => r.json());
     if (!j?.ok) throw new Error(j?.error || "Sync failed");
 
