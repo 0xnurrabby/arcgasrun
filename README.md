@@ -1,102 +1,87 @@
-<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=1,6,30&height=180&section=header&text=GasRun&fontSize=56&fontColor=000000&fontAlignY=38&desc=On-chain+car+lane-runner+game+on+Base+with+global+leaderboard&descAlignY=58&descSize=14&animation=fadeIn" width="100%"/>
+# GasRun — Arc Testnet
 
-<div align="center">
+Lane-runner arcade game on **Arc Testnet** with weekly leaderboard, permanent USDC balances, and instant USDC withdraw via smart contract.
 
-[![Play](https://img.shields.io/badge/Play%20Now-bbf7d0?style=for-the-badge&logoColor=000)](https://www.gasrun.online)
-[![License](https://img.shields.io/badge/MIT-bfdbfe?style=for-the-badge&logoColor=000)](LICENSE)
-[![Platform](https://img.shields.io/badge/Farcaster%20Mini%20App-fde68a?style=for-the-badge&logoColor=000)]()
-[![Tech](https://img.shields.io/badge/JavaScript%20%2B%20Base-fca5a5?style=for-the-badge&logoColor=000)]()
+## Network
 
-</div>
+| | |
+|---|---|
+| Chain | Arc Testnet |
+| Chain ID | `5042002` |
+| RPC | `https://rpc.testnet.arc.network` |
+| Explorer | https://testnet.arcscan.app |
+| USDC (ERC-20, 6 dec) | `0x3600000000000000000000000000000000000000` |
+| Faucet | https://faucet.circle.com |
 
-<div align="center">
-<i>A lane-runner car game built as a Farcaster mini app on Base .... dodge traffic, score points, and commit your score permanently on-chain.</i>
-</div>
+## Features
 
----
+- Play → save points (25% decay every 10 min if not deposited/converted)
+- **Deposit** saved points → weekly leaderboard (Neon + optional on-chain score log)
+- **Convert** points → permanent USDC (`1000 pts = 1 USDC`)
+- **Withdraw** permanent USDC to wallet (min 1 USDC, instant via vault contract)
+- **Admin** at `/admin` (wallet-gated)
 
-## ✦ Features
+## Admin
 
-<div align="center">
+Only wallet: `0xe8Bda2Ed9d2FC622D900C8a76dc455A3e79B041f`
 
-| | Feature | What it does |
-|:---:|---|---|
-| 🚗 | Lane-runner gameplay | Dodge incoming traffic across lanes, score based on distance |
-| ⛓️ | On-chain score commits | Write your final score to Base Mainnet via smart contract |
-| 🏆 | Global leaderboard | Weekly and all-time boards sourced from on-chain logs |
-| 🔑 | Wallet connect | WalletConnect + injected wallet support |
-| ⛽ | Gasless transactions | Paymaster endpoint for gasless score submissions |
-| 📱 | Farcaster native | Runs inside Warpcast / Base app as a mini app |
-| 📊 | Redis-cached leaderboard | Instant board load from Redis cache |
-
-</div>
-
----
-
-## ✦ Download & Run
-
-**Step 1** .... Clone the repo
-
-```bash
-git clone https://github.com/0xnurrabby/GasRun
-cd GasRun
-```
-
-**Step 2** .... Install and configure
+## Setup
 
 ```bash
 npm install
-# Create a .env file with required vars (see Setup)
+# .env already has DATABASE_URL + deployer key (see DEPLOY_KEYS.md)
+npm run init:db
 ```
 
-**Step 3** .... Start dev server
+### Deploy contracts (one-time)
+
+1. Fund deployer from Circle Faucet (address in `DEPLOY_KEYS.md`)
+2. `npm run deploy:contracts`
+3. Set `VAULT_ADDRESS` + `SCORE_ADDRESS` in `.env` and `contracts-config.js`
+4. Fund vault by sending Arc USDC to the vault address
+
+### Run locally
 
 ```bash
-npm run dev
-# Or just open index.html in a browser (no build step needed)
-# All game logic is in src/main.js (vanilla JS)
+npx vercel dev
+# or any static server + serverless for /api
 ```
 
----
-
-## ✦ Setup
+### Vercel env
 
 ```
-1. Clone the repo and run npm install
-2. Create a .env file with:
-   UPSTASH_REDIS_REST_URL=your_url
-   UPSTASH_REDIS_REST_TOKEN=your_token
-   NEYNAR_API_KEY=your_key   (optional, for FC usernames on leaderboard)
-   MAINTENANCE_MODE=false
-3. Run npm run dev for local dev
-4. To deploy: push to GitHub and import in vercel.com
-   No build step needed - Vercel serves static files directly
-5. Game is also live at https://www.gasrun.online
+DATABASE_URL=...
+OPERATOR_PRIVATE_KEY=...
+DEPLOYER_PRIVATE_KEY=...
+VAULT_ADDRESS=...
+SCORE_ADDRESS=...
+ADMIN_ADDRESS=0xe8Bda2Ed9d2FC622D900C8a76dc455A3e79B041f
+ARC_RPC_URL=https://rpc.testnet.arc.network
+USDC_ADDRESS=0x3600000000000000000000000000000000000000
 ```
 
----
+## Economy
 
-## ✦ Project Structure
+| Action | Rule |
+|--------|------|
+| Convert | 1000 points → 1 permanent USDC |
+| Withdraw | min 1 USDC, instant on-chain to user wallet |
+| Leaderboard | deposit saved points for weekly ranking |
+| Penalty | -25% saved points every 10 minutes if not saved to LB / USDC |
+
+## Project layout
 
 ```
-GasRun/
-  api/
-    leaderboard.js    ->  weekly/all-time leaderboard with Redis cache
-    paymaster.js      ->  gasless transaction endpoint
-    share.js          ->  share card generator
-    cron/             ->  scheduled leaderboard cache refresh
-  src/
-    main.js           ->  full game engine + wallet + on-chain logic
-    styles.css        ->  game UI styles
-  assets/             ->  sprites, icons, OG images
-  .well-known/        ->  Farcaster app manifest
-  index.html          ->  mini app entry point
-  middleware.js       ->  Vercel edge middleware
-  package.json
+api/           serverless (user, convert, withdraw, deposit, leaderboard, admin)
+admin/         admin panel UI
+contracts/     GasRunVault + GasRunScore
+scripts/       deploy + db init
+src/main.js    game + wallet + Arc flows
 ```
 
----
+## Docs used
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=1,6,30&height=100&section=footer&animation=fadeIn" width="100%"/>
-
-<div align="center">MIT License .... built by <a href="https://github.com/0xnurrabby">0xnurrabby</a></div>
+- https://docs.arc.io/build
+- https://docs.arc.io/arc/references/connect-to-arc
+- https://docs.arc.io/arc/references/contract-addresses
+- https://developers.circle.com/

@@ -88,8 +88,8 @@ async function getWalletConnectProvider() {
 
     const provider = await EthereumProvider.init({
       projectId: WALLETCONNECT_PROJECT_ID,
-      chains: [8453], // Base Mainnet
-      optionalChains: [8453, 1],
+      chains: [5042002], // Arc Testnet
+      optionalChains: [5042002],
       showQrModal: true,
       qrModalOptions: {
         themeMode: document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light",
@@ -101,12 +101,12 @@ async function getWalletConnectProvider() {
       },
       metadata: {
         name: "GasRun",
-        description: "Onchain arcade racer on Base",
+        description: "Onchain arcade racer on Arc Testnet",
         url: typeof window !== "undefined" ? window.location.origin : "https://gasrun.online",
         icons: ["https://gasrun.online/assets/icon.png"]
       },
       rpcMap: {
-        8453: "https://mainnet.base.org"
+        5042002: "https://rpc.testnet.arc.network"
       }
     });
 
@@ -117,7 +117,7 @@ async function getWalletConnectProvider() {
         if (!account) {
           ethProvider = null;
           activeWalletId = null;
-          activeWalletLabel = "Base";
+          activeWalletLabel = "Arc";
         }
         try { renderStatus(); } catch {}
       });
@@ -126,7 +126,7 @@ async function getWalletConnectProvider() {
           account = null;
           ethProvider = null;
           activeWalletId = null;
-          activeWalletLabel = "Base";
+          activeWalletLabel = "Arc";
           try { renderStatus(); } catch {}
           try { toast("Wallet disconnected"); } catch {}
         }
@@ -273,10 +273,20 @@ let wasGameOver = false;
 let weekCountdownRAF = 0;
 let weekCountdownActive = false;
 
-const BASE_CHAIN_ID_HEX = "0x2105";
-const CONTRACT = "0x5B53e9A0659dC71cd69eA6261420295B48EF3095";
+// Arc Testnet
+const ARC_CHAIN_ID = 5042002;
+const ARC_CHAIN_ID_HEX = "0x4cf152";
+const ARC_RPC = "https://rpc.testnet.arc.network";
+const ARC_EXPLORER = "https://testnet.arcscan.app";
+const ARC_USDC = "0x3600000000000000000000000000000000000000";
+// Filled after deploy (also overridable via window.__GASRUN_CONTRACTS)
+const SCORE_CONTRACT = (window.__GASRUN_CONTRACTS && window.__GASRUN_CONTRACTS.score) || "0x0000000000000000000000000000000000000000";
+const VAULT_CONTRACT = (window.__GASRUN_CONTRACTS && window.__GASRUN_CONTRACTS.vault) || "0x0000000000000000000000000000000000000000";
+const CONTRACT = SCORE_CONTRACT;
+const POINTS_PER_USDC = 1000;
+const MIN_WITHDRAW_USDC = 1;
 
-// Builder Code from your screenshot (must match Base.dev)
+// Builder Code (optional attribution)
 const BUILDER_CODE = "bc_ox3c2ez4";
 /* dataSuffix is computed lazily via ensureAttribution() */
 // On-chain action name (bytes32)
@@ -520,7 +530,7 @@ prefetchWeb3Deps();
 let ethProvider = null;
 let account = null;
 let activeWalletId = null;
-let activeWalletLabel = "Base";
+let activeWalletLabel = "Arc";
 let miniAppProviderPromise = null;
 const injectedWallets = new Map();
 
@@ -582,7 +592,7 @@ function bindProviderEvents(provider) {
     if (!account) {
       ethProvider = null;
       activeWalletId = null;
-      activeWalletLabel = "Base";
+      activeWalletLabel = "Arc";
     }
     renderStatus();
   });
@@ -591,7 +601,7 @@ function bindProviderEvents(provider) {
     account = null;
     ethProvider = null;
     activeWalletId = null;
-    activeWalletLabel = "Base";
+    activeWalletLabel = "Arc";
     renderStatus();
   });
 }
@@ -788,7 +798,7 @@ function renderStatus() {
     els.statusBadge.textContent = "Connect";
     return;
   }
-  els.statusBadge.textContent = `${shortAddr(account)} (${activeWalletLabel || "Base"})`;
+  els.statusBadge.textContent = `${shortAddr(account)} (${activeWalletLabel || "Arc"})`;
 }
 
 async function cacheConnectedUserLabel() {
@@ -813,7 +823,7 @@ async function connectWallet(source = "miniapp", walletLabel = null) {
   if (!p) {
     const msg =
       source === "miniapp"
-        ? "Base/Farcaster host not detected. Use WalletConnect or install MetaMask."
+        ? "Mini app host not detected. Use WalletConnect or install MetaMask."
         : source === "walletconnect"
         ? "WalletConnect unavailable. Check your internet or try again."
         : "No wallet found. Try WalletConnect or install a browser wallet.";
@@ -841,12 +851,14 @@ async function connectWallet(source = "miniapp", walletLabel = null) {
     activeWalletId = source;
     activeWalletLabel = normalizeWalletLabel(
       walletLabel || (
-        source === "miniapp" ? "Base" :
+        source === "miniapp" ? "Arc" :
         source === "walletconnect" ? "WalletConnect" :
         "Browser Wallet"
       ),
-      "Base"
+      "Arc"
     );
+    try { await ensureArc(); } catch {}
+    try { await refreshServerBalance(); } catch {}
     try { refreshWalletCapabilities(p); } catch {}
     await cacheConnectedUserLabel();
     renderStatus();
@@ -875,7 +887,7 @@ async function openWalletConnectFlow() {
   if (isMiniHost) {
     options.push({
       id: "miniapp",
-      label: "Base / Farcaster wallet",
+      label: "Arc / Mini App wallet",
       sub: account && activeWalletId === "miniapp"
         ? "Already connected here"
         : "Uses the wallet provided by the host app"
@@ -952,7 +964,7 @@ async function openWalletConnectFlow() {
   document.querySelectorAll("[data-wallet-id]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const walletId = btn.getAttribute("data-wallet-id") || "miniapp";
-      const walletLabel = btn.getAttribute("data-wallet-label") || "Base";
+      const walletLabel = btn.getAttribute("data-wallet-label") || "Arc";
       btn.disabled = true;
       const connected = await connectWallet(walletId, walletLabel);
       if (connected) openMainMenu();
@@ -994,82 +1006,198 @@ async function detectMiniHostFast() {
 
 
 // =====================================================
-// ensureBase — make sure the wallet is on Base Mainnet (0x2105 / 8453)
-// Works for all providers: miniapp, injected (MetaMask/Coinbase/etc),
-// and WalletConnect v2 (Trust, Rainbow, OKX, etc.).
+// ensureArc — Arc Testnet (chainId 5042002 / 0x4cf152)
 // =====================================================
-async function ensureBase() {
+async function ensureArc() {
   const p = await getProvider();
   if (!p) throw new Error("No wallet provider. Please reconnect your wallet.");
 
-  // 1) Read current chain
   let chainId;
   try {
     chainId = await p.request({ method: "eth_chainId", params: [] });
   } catch (e) {
-    // Some mobile wallets block eth_chainId when session is stale — try reconnect once.
     throw new Error("Wallet session expired. Please reconnect and try again.");
   }
 
-  if (chainId === BASE_CHAIN_ID_HEX) return; // already on Base ✅
+  const normalized = String(chainId || "").toLowerCase();
+  if (normalized === ARC_CHAIN_ID_HEX || Number(chainId) === ARC_CHAIN_ID) return;
 
-  // 2) Try wallet_switchEthereumChain (standard path — MetaMask, Rabby, Coinbase Wallet)
   try {
     await p.request({
       method: "wallet_switchEthereumChain",
-      params: [{ chainId: BASE_CHAIN_ID_HEX }]
+      params: [{ chainId: ARC_CHAIN_ID_HEX }]
     });
     return;
   } catch (switchErr) {
     const code = switchErr?.code;
-    // 4902 = chain not added; 4001 = user rejected
     if (code === 4001) {
-      throw new Error("Please switch to Base Mainnet to deposit.");
+      throw new Error("Please switch to Arc Testnet to continue.");
     }
-    // For WalletConnect / Trust / Rainbow / any wallet that doesn't know Base yet → try adding.
     if (code === 4902 || code === -32602 || code === -32603 || !code) {
       try {
         await p.request({
           method: "wallet_addEthereumChain",
           params: [{
-            chainId: BASE_CHAIN_ID_HEX,
-            chainName: "Base",
-            nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-            rpcUrls: ["https://mainnet.base.org"],
-            blockExplorerUrls: ["https://basescan.org"]
+            chainId: ARC_CHAIN_ID_HEX,
+            chainName: "Arc Testnet",
+            nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+            rpcUrls: [ARC_RPC],
+            blockExplorerUrls: [ARC_EXPLORER]
           }]
         });
-        // After adding, some wallets auto-switch; others need another switch call.
         try {
           await p.request({
             method: "wallet_switchEthereumChain",
-            params: [{ chainId: BASE_CHAIN_ID_HEX }]
+            params: [{ chainId: ARC_CHAIN_ID_HEX }]
           });
         } catch {}
       } catch (addErr) {
         if (addErr?.code === 4001) {
-          throw new Error("Please approve adding Base network to continue.");
+          throw new Error("Please approve adding Arc Testnet to continue.");
         }
         throw new Error(
-          "Could not switch to Base. Open your wallet app and switch network to Base Mainnet, then try again."
+          "Could not switch to Arc Testnet. Add network manually (RPC https://rpc.testnet.arc.network, chainId 5042002)."
         );
       }
     } else {
-      throw new Error(
-        "Network switch failed. Please switch to Base Mainnet in your wallet app manually."
-      );
+      throw new Error("Network switch failed. Switch to Arc Testnet in your wallet.");
     }
   }
 
-  // 3) Final verification — confirm we really are on Base now.
   try {
     const verify = await p.request({ method: "eth_chainId", params: [] });
-    if (verify !== BASE_CHAIN_ID_HEX) {
-      throw new Error("Please switch to Base Mainnet in your wallet, then try again.");
+    if (String(verify).toLowerCase() !== ARC_CHAIN_ID_HEX && Number(verify) !== ARC_CHAIN_ID) {
+      throw new Error("Please switch to Arc Testnet in your wallet, then try again.");
     }
   } catch (e) {
     if (String(e?.message || "").includes("Please switch")) throw e;
-    // Non-fatal — proceed; the downstream send will catch chain mismatches.
+  }
+}
+
+async function signGasrunMessage(message) {
+  const p = await getProvider();
+  if (!p || !account) throw new Error("Connect wallet first");
+  return await p.request({
+    method: "personal_sign",
+    params: [message, account]
+  });
+}
+
+async function fetchUserServer() {
+  if (!account) return null;
+  const res = await fetch(`/api/user?address=${account}`, { cache: "no-store" });
+  const j = await res.json().catch(() => ({}));
+  if (!j?.ok) return null;
+  return j;
+}
+
+let serverUsdcBalance = "0.000000";
+let serverUsdcMicros = "0";
+
+async function refreshServerBalance() {
+  try {
+    const j = await fetchUserServer();
+    if (j?.user) {
+      serverUsdcBalance = j.user.usdcBalance || "0.000000";
+      serverUsdcMicros = j.user.usdcBalanceMicros || "0";
+      if (typeof j.user.totalDepositedPts === "number") {
+        localStorage.setItem(LS_TOTAL_DEPOSITED, String(j.user.totalDepositedPts));
+      }
+    }
+  } catch {}
+}
+
+async function convertPointsToUsdc() {
+  applyDecay();
+  if (!account) {
+    await connectWallet();
+    if (!account) return;
+  }
+  const pts = Math.floor(profile.bankPoints);
+  if (pts < POINTS_PER_USDC) {
+    toast(`Need at least ${POINTS_PER_USDC} saved points (1 USDC)`);
+    return;
+  }
+  const usePts = Math.floor(pts / POINTS_PER_USDC) * POINTS_PER_USDC;
+  const usdcAmt = usePts / POINTS_PER_USDC;
+  if (!confirm(`Convert ${usePts} points → ${usdcAmt} permanent USDC?`)) return;
+
+  try {
+    toast("Sign to convert…", 1500);
+    const timestamp = Date.now();
+    const message = `gasrun:convert:${account.toLowerCase()}:${usePts}:${timestamp}`;
+    const signature = await signGasrunMessage(message);
+    const res = await fetch("/api/convert", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        address: account,
+        points: usePts,
+        timestamp,
+        signature
+      })
+    });
+    const j = await res.json();
+    if (!j?.ok) throw new Error(j?.error || "Convert failed");
+    profile.bankPoints = Math.max(0, profile.bankPoints - usePts);
+    persistProfile();
+    serverUsdcBalance = j.usdcBalance;
+    serverUsdcMicros = j.usdcBalanceMicros;
+    toast(`Converted → ${j.usdcAdded} USDC permanent`, 2500);
+    openMainMenu();
+  } catch (e) {
+    toast(e?.message ? String(e.message) : "Convert failed");
+  }
+}
+
+async function withdrawUsdc() {
+  if (!account) {
+    await connectWallet();
+    if (!account) return;
+  }
+  await refreshServerBalance();
+  const bal = Number(serverUsdcBalance || 0);
+  if (bal < MIN_WITHDRAW_USDC) {
+    toast("Need at least 1.0 permanent USDC to withdraw");
+    return;
+  }
+  const raw = prompt(`Withdraw USDC to your wallet (min 1, max ${bal}):`, String(Math.floor(bal)));
+  if (raw == null) return;
+  const amount = Math.floor(Number(raw));
+  if (!Number.isFinite(amount) || amount < MIN_WITHDRAW_USDC) {
+    toast("Invalid amount (min 1 USDC)");
+    return;
+  }
+  if (amount > Math.floor(bal)) {
+    toast("Amount exceeds permanent USDC balance");
+    return;
+  }
+
+  try {
+    toast("Sign withdraw…", 1500);
+    const usdcMicros = String(amount * 1_000_000);
+    const timestamp = Date.now();
+    const message = `gasrun:withdraw:${account.toLowerCase()}:${usdcMicros}:${timestamp}`;
+    const signature = await signGasrunMessage(message);
+    toast("Sending on-chain payout…", 2000);
+    const res = await fetch("/api/withdraw", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        address: account,
+        usdcMicros,
+        timestamp,
+        signature
+      })
+    });
+    const j = await res.json();
+    if (!j?.ok) throw new Error(j?.error || "Withdraw failed");
+    serverUsdcBalance = j.usdcBalance;
+    toast(`Withdrawn ${j.amount} USDC ✓`, 2800);
+    if (j.explorer) console.log("tx", j.explorer);
+    openMainMenu();
+  } catch (e) {
+    toast(e?.message ? String(e.message) : "Withdraw failed");
   }
 }
 
@@ -1541,137 +1669,85 @@ async function commitWeeklyOnchain() {
   await new Promise((r) => requestAnimationFrame(() => r()));
 
   try {
-    await ensureBase();
-
-    // Ensure web3 encoders + builder dataSuffix are available (prefetched in background when possible)
+    await ensureArc();
     await warmWeb3Deps();
 
     const p = await getProvider();
     if (!p) throw new Error("No provider");
 
-    const chainId = await p.request({ method: "eth_chainId", params: [] });
-
     const weekStart = weekStartUtcMs();
-    const payload = encodeAbiParameters(
-      [{ type: "uint256" }, { type: "uint256" }],
-      [BigInt(pts), BigInt(weekStart)]
-    );
+    let txHash = null;
 
-    const data = encodeFunctionData({
-      abi: [
-        {
-          type: "function",
-          name: "logAction",
-          stateMutability: "nonpayable",
-          inputs: [
-            { name: "action", type: "bytes32" },
-            { name: "data", type: "bytes" }
-          ],
-          outputs: []
-        }
-      ],
-      functionName: "logAction",
-      args: [ACTION_WEEKLY_ADD, payload]
-    });
-    const call = { to: CONTRACT, value: "0x0", data };
-
-    const buildSendCallsParams = (usePaymaster) => ({
-      version: "2.0.0",
-      from: account,
-      chainId,
-      atomicRequired: true,
-      calls: [call],
-      capabilities: (() => {
-        const caps = {};
-        // Keep your Builder attribution (ERC-8021)
-        if (dataSuffix) caps.dataSuffix = dataSuffix;
-        // Optionally add Paymaster sponsorship (ERC-7677) via your backend proxy
-        if (usePaymaster) {
-          caps.paymasterService = { url: new URL("/api/paymaster", window.location.origin).toString() };
-        }
-        return caps;
-      })()
-    });
-
-    const isSendCallsUnsupported = (low) =>
-      low.includes("wallet_sendcalls") ||
-      low.includes("method not found") ||
-      low.includes("unknown method") ||
-      low.includes("not supported") ||
-      low.includes("unsupported") ||
-      low.includes("capability");
-
-    const sendEthTx = async () => {
-      toast("Sending normal transaction (gas required)…", 1600);
-      return await p.request({
-        method: "eth_sendTransaction",
-        params: [
+    // Optional on-chain score log when score contract is deployed
+    if (CONTRACT && !CONTRACT.startsWith("0x0000000000000000000000000000000000000000")) {
+      const payload = encodeAbiParameters(
+        [{ type: "uint256" }, { type: "uint256" }],
+        [BigInt(pts), BigInt(weekStart)]
+      );
+      const data = encodeFunctionData({
+        abi: [
           {
-            from: account,
-            to: CONTRACT,
-            value: "0x0",
-            data
+            type: "function",
+            name: "logAction",
+            stateMutability: "nonpayable",
+            inputs: [
+              { name: "action", type: "bytes32" },
+              { name: "data", type: "bytes" }
+            ],
+            outputs: []
           }
-        ]
+        ],
+        functionName: "logAction",
+        args: [ACTION_WEEKLY_ADD, payload]
       });
-    };
-
-    // Flow:
-    // 1) wallet_sendCalls with paymaster
-    // 2) if paymaster-related fail -> wallet_sendCalls without paymaster
-    // 3) if wallet_sendCalls unsupported -> eth_sendTransaction fallback
-    try {
-      await p.request({ method: "wallet_sendCalls", params: [buildSendCallsParams(true)] });
-    } catch (e1) {
-      const msg1 = String(e1?.message || e1 || "");
-      const low1 = msg1.toLowerCase();
-
-      if (low1.includes("rejected")) {
-        toast("Transaction rejected");
-        return;
-      }
-
-      if (isSendCallsUnsupported(low1)) {
-        const proxy = await checkPaymasterProxy();
-        console.warn("wallet_sendCalls unsupported -> fallback eth_sendTransaction", { proxy, err: e1 });
-        await sendEthTx();
-      } else {
-        // paymaster/proxy/erc-7677 failed -> retry without paymaster
-        toast("Gasless failed — retrying without paymaster…", 1600);
-        try {
-          await p.request({ method: "wallet_sendCalls", params: [buildSendCallsParams(false)] });
-        } catch (e2) {
-          const msg2 = String(e2?.message || e2 || "");
-          const low2 = msg2.toLowerCase();
-
-          if (low2.includes("rejected")) {
-            toast("Transaction rejected");
-            return;
-          }
-
-          // final fallback: old-school tx
-          const proxy = await checkPaymasterProxy();
-          console.warn("wallet_sendCalls failed even without paymaster -> fallback eth_sendTransaction", { proxy, err: e2 });
-          await sendEthTx();
+      try {
+        toast("Confirm on-chain deposit…", 1600);
+        txHash = await p.request({
+          method: "eth_sendTransaction",
+          params: [{ from: account, to: CONTRACT, value: "0x0", data }]
+        });
+      } catch (e1) {
+        const low = String(e1?.message || e1 || "").toLowerCase();
+        if (low.includes("rejected") || low.includes("denied")) {
+          toast("Transaction rejected");
+          return;
         }
+        console.warn("on-chain log skipped", e1);
       }
     }
 
-    // Track total deposited points for leaderboard unlock (backend is untouched)
+    // Neon leaderboard deposit (source of truth on Arc)
+    const timestamp = Date.now();
+    const message = `gasrun:deposit:${account.toLowerCase()}:${pts}:${timestamp}`;
+    toast("Sign deposit…", 1500);
+    const signature = await signGasrunMessage(message);
+    const res = await fetch("/api/deposit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        address: account,
+        points: pts,
+        weekStartMs: weekStart,
+        txHash,
+        timestamp,
+        signature
+      })
+    });
+    const j = await res.json();
+    if (!j?.ok) throw new Error(j?.error || "Deposit failed");
+
     const wasLocked = !isLeaderboardUnlocked();
     addToTotalDeposited(pts);
     const nowUnlocked = isLeaderboardUnlocked();
 
     profile.bankPoints = 0;
-
     persistProfile();
 
     if (wasLocked && nowUnlocked) {
       toast("🏆 LEADERBOARD UNLOCKED! Welcome to the competition.", 3200);
     } else {
-      toast("Committed on-chain! Updating leaderboard…", 2200);
+      toast("Deposited to weekly leaderboard!", 2200);
     }
-
 
     if (isSheetOpen()) await openLeaderboardsView();
   } catch (e) {
@@ -1915,19 +1991,24 @@ els.statusBadge.addEventListener("click", async () => {
 function openMainMenu() {
   // User is about to interact with wallet/deposit; warm deps aggressively but non-blocking.
   warmWeb3Deps();
+  refreshServerBalance();
   const walletLine = account ? shortAddr(account) : "Not connected";
   const week = weekIdUtc();
+  const convertible = Math.floor(Math.floor(profile.bankPoints) / POINTS_PER_USDC);
 
   openSheet(
     "Menu",
     `
     <div class="menuGrid">
       <div class="kv"><div class="k">Wallet</div><div class="v">${walletLine}</div></div>
+      <div class="kv"><div class="k">Network</div><div class="v">Arc Testnet</div></div>
       <div class="kv"><div class="k">Week</div><div class="v">${week} (UTC) <span class="weekCountdownWrap">(<canvas id="weekCountdownSeg" class="segCanvas" aria-label="Week remaining"></canvas>)</span></div></div>
       <div class="kv"><div class="k">Run points</div><div class="v">${Math.floor(game.runScore)}</div></div>
       <div class="kv"><div class="k">Saved points</div><div class="v">${Math.floor(profile.bankPoints)}</div></div>
+      <div class="kv"><div class="k">Permanent USDC</div><div class="v">${serverUsdcBalance}</div></div>
       <div class="kv"><div class="k">Coins</div><div class="v">${Math.floor(profile.coins)} (→ ${Math.floor(profile.coins) * 10} pts)</div></div>
       <div class="kv"><div class="k">⚠️Saved points deduction</div><div class="v">-25% every 10 min</div></div>
+      <div class="kv"><div class="k">Rate</div><div class="v">1000 pts = 1 USDC · min wd 1 USDC</div></div>
     </div>
 
     <div class="btnRow">
@@ -1941,6 +2022,11 @@ function openMainMenu() {
         <img class="pillIcon" src="/assets/bag.png" alt="" aria-hidden="true" />
         Earn
       </button>
+    </div>
+
+    <div class="btnRow">
+      <button class="pill" id="btnToUsdc">Convert points → USDC (${convertible})</button>
+      <button class="pill primary" id="btnWithdrawUsdc">Withdraw USDC</button>
     </div>
 
     <div class="commitWrap">
@@ -1964,7 +2050,7 @@ function openMainMenu() {
     </div>
 
     <div class="alertRed">
-  ⚠️ Important: Please Deposit your Saved points within every 10 min. If you don't,  25% percent of your saved points will be deducted every 10 minutes!
+  ⚠️ Important: Deposit or convert Saved points within 10 min — otherwise 25% is deducted every 10 minutes!
 </div>
 
     <div class="themeSwitchCard">
@@ -2000,6 +2086,8 @@ function openMainMenu() {
     convertCoinsToBank();
     openMainMenu();
   });
+  $("#btnToUsdc")?.addEventListener("click", () => convertPointsToUsdc());
+  $("#btnWithdrawUsdc")?.addEventListener("click", () => withdrawUsdc());
   $("#btnHow").addEventListener("click", openHowView);
 
   const commitBtn = $("#btnCommit");

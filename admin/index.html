@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GasRun Admin — Arc Testnet</title>
+  <style>
+    :root { --bg:#0b1020; --card:#141b2d; --ink:#e8eefc; --muted:#8b97b3; --accent:#4cc9f0; --good:#06d6a0; --bad:#ef476f; --warn:#f7d046; --line:#243049; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, Segoe UI, Roboto, sans-serif; background:linear-gradient(160deg,#0b1020,#121a33 50%,#0d1528); color:var(--ink); min-height:100vh; }
+    .wrap { max-width:1100px; margin:0 auto; padding:24px 16px 60px; }
+    h1 { margin:0 0 6px; font-size:1.6rem; }
+    .sub { color:var(--muted); margin-bottom:20px; font-size:.92rem; }
+    .row { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; flex:1 1 220px; }
+    .card h3 { margin:0 0 10px; font-size:.95rem; color:var(--accent); }
+    .stat { font-size:1.45rem; font-weight:700; }
+    .muted { color:var(--muted); font-size:.85rem; }
+    button, .btn { background:var(--accent); color:#041018; border:0; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer; }
+    button.secondary { background:#243049; color:var(--ink); }
+    button.danger { background:var(--bad); color:#fff; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    input { width:100%; background:#0d1424; border:1px solid var(--line); color:var(--ink); border-radius:10px; padding:10px 12px; margin:6px 0 12px; }
+    label { font-size:.82rem; color:var(--muted); display:block; }
+    table { width:100%; border-collapse:collapse; font-size:.82rem; }
+    th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--muted); font-weight:600; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:.75rem; font-weight:700; }
+    .pill.ok { background:rgba(6,214,160,.15); color:var(--good); }
+    .pill.bad { background:rgba(239,71,111,.15); color:var(--bad); }
+    .pill.pend { background:rgba(247,208,70,.15); color:var(--warn); }
+    .lock { max-width:520px; margin:80px auto; text-align:center; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break:break-all; }
+    .err { color:var(--bad); margin-top:10px; }
+    .okmsg { color:var(--good); margin-top:10px; }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; margin:18px 0; }
+    .tabs button { background:#1a243a; color:var(--ink); }
+    .tabs button.active { background:var(--accent); color:#041018; }
+    .hidden { display:none; }
+    a { color:var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="gate" class="lock card">
+      <h1>GasRun Admin</h1>
+      <p class="sub">Arc Testnet · only the configured admin wallet can enter</p>
+      <p class="muted mono" id="expectedAdmin">…</p>
+      <button id="btnConnect">Connect admin wallet</button>
+      <div class="err" id="gateErr"></div>
+    </div>
+
+    <div id="app" class="hidden">
+      <h1>GasRun Admin Panel</h1>
+      <p class="sub">Arc Testnet · <span class="mono" id="who"></span></p>
+
+      <div class="row" id="stats"></div>
+
+      <div class="card" style="margin-bottom:16px">
+        <h3>Contract</h3>
+        <div class="muted mono" id="contractInfo">Loading…</div>
+        <div class="row" style="margin-top:12px">
+          <button class="secondary" id="btnRefresh">Refresh</button>
+          <button id="btnCopyVault">Copy vault address</button>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="active" data-tab="withdrawals">Withdrawals</button>
+        <button data-tab="conversions">Conversions</button>
+        <button data-tab="deposits">Leaderboard deposits</button>
+        <button data-tab="users">Users</button>
+        <button data-tab="actions">Vault actions</button>
+      </div>
+
+      <div id="tab-withdrawals" class="card"></div>
+      <div id="tab-conversions" class="card hidden"></div>
+      <div id="tab-deposits" class="card hidden"></div>
+      <div id="tab-users" class="card hidden"></div>
+      <div id="tab-actions" class="card hidden">
+        <h3>Admin vault withdraw (owner key / owner wallet on backend)</h3>
+        <label>To address</label>
+        <input id="wdTo" placeholder="0x…" />
+        <label>Amount USDC</label>
+        <input id="wdAmt" type="number" min="0" step="0.000001" placeholder="10" />
+        <button class="danger" id="btnAdminWd">Withdraw from vault</button>
+        <hr style="border-color:var(--line); margin:18px 0" />
+        <h3>Credit user permanent USDC balance (DB only)</h3>
+        <label>User address</label>
+        <input id="crTo" placeholder="0x…" />
+        <label>Amount USDC</label>
+        <input id="crAmt" type="number" min="0" step="1" placeholder="5" />
+        <button id="btnCredit">Credit USDC balance</button>
+        <div class="okmsg" id="actionMsg"></div>
+        <div class="err" id="actionErr"></div>
+        <p class="muted" style="margin-top:14px">
+          To fund the vault: send Arc Testnet USDC ERC-20 to the vault address, then approve+deposit via wallet or transfer directly if using transferFrom deposit path.
+          Simple path: transfer USDC to vault address (ERC-20 transfer) — <b>balance()</b> reads token balance, so direct transfer works for liquidity.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    const ADMIN_FALLBACK = "0xe8Bda2Ed9d2FC622D900C8a76dc455A3e79B041f";
+    let account = null;
+    let provider = null;
+    let adminExpected = ADMIN_FALLBACK.toLowerCase();
+    let data = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    async function eth() {
+      if (!window.ethereum) throw new Error("No wallet found. Install MetaMask.");
+      return window.ethereum;
+    }
+
+    async function connect() {
+      $("gateErr").textContent = "";
+      try {
+        provider = await eth();
+        const accs = await provider.request({ method: "eth_requestAccounts" });
+        account = (accs[0] || "").toLowerCase();
+        if (account !== adminExpected) {
+          throw new Error(`Wrong wallet. Connect ${adminExpected}`);
+        }
+        $("gate").classList.add("hidden");
+        $("app").classList.remove("hidden");
+        $("who").textContent = account;
+        await refresh();
+      } catch (e) {
+        $("gateErr").textContent = e?.message || String(e);
+      }
+    }
+
+    async function signAdmin() {
+      const timestamp = Date.now();
+      const message = `gasrun:admin:${account}:${timestamp}`;
+      const signature = await provider.request({
+        method: "personal_sign",
+        params: [message, account],
+      });
+      return { address: account, timestamp, signature };
+    }
+
+    async function refresh() {
+      const r = await fetch(`/api/admin?address=${account}`, { cache: "no-store" });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "Failed to load admin data");
+      data = j;
+      render();
+    }
+
+    function pill(status) {
+      const s = String(status || "").toLowerCase();
+      if (s === "completed") return `<span class="pill ok">completed</span>`;
+      if (s === "failed") return `<span class="pill bad">failed</span>`;
+      return `<span class="pill pend">${s || "pending"}</span>`;
+    }
+
+    function render() {
+      const s = data.stats || {};
+      const c = data.chain || {};
+      $("stats").innerHTML = `
+        <div class="card"><h3>Users</h3><div class="stat">${s.users ?? 0}</div></div>
+        <div class="card"><h3>Vault USDC</h3><div class="stat">${s.vaultBalance ?? "—"}</div><div class="muted">on-chain liquidity</div></div>
+        <div class="card"><h3>User USDC liabilities</h3><div class="stat">${s.userUsdcLiabilities ?? "0"}</div><div class="muted">permanent balances</div></div>
+        <div class="card"><h3>Withdrawn</h3><div class="stat">${s.totalWithdrawn ?? "0"}</div><div class="muted">completed</div></div>
+        <div class="card"><h3>Week points</h3><div class="stat">${s.weekPoints ?? "0"}</div></div>
+      `;
+      $("contractInfo").innerHTML = `
+        Chain ID: ${c.chainId}<br/>
+        RPC: ${c.rpc}<br/>
+        USDC: <span class="mono">${c.usdc}</span><br/>
+        Vault: <span class="mono">${c.vault || "(not set)"}</span><br/>
+        Score: <span class="mono">${c.score || "(not set)"}</span><br/>
+        Operator: <span class="mono">${c.operator || "(deployer)"}</span><br/>
+        Explorer: <a href="https://testnet.arcscan.app/address/${c.vault}" target="_blank" rel="noreferrer">vault on ArcScan</a>
+      `;
+
+      $("tab-withdrawals").innerHTML = `
+        <h3>Recent withdrawals</h3>
+        <table><thead><tr><th>ID</th><th>User</th><th>Amount</th><th>Status</th><th>Tx</th><th>Time</th></tr></thead>
+        <tbody>${(data.recentWithdrawals || []).map(w => `
+          <tr>
+            <td>${w.id}</td>
+            <td class="mono">${w.address}</td>
+            <td>${w.amount}</td>
+            <td>${pill(w.status)}</td>
+            <td>${w.tx_hash ? `<a href="https://testnet.arcscan.app/tx/${w.tx_hash}" target="_blank">tx</a>` : (w.error || "—")}</td>
+            <td>${w.created_at || ""}</td>
+          </tr>`).join("") || "<tr><td colspan=6 class='muted'>No withdrawals yet</td></tr>"}
+        </tbody></table>`;
+
+      $("tab-conversions").innerHTML = `
+        <h3>Point → USDC conversions</h3>
+        <table><thead><tr><th>ID</th><th>User</th><th>Points</th><th>USDC</th><th>Time</th></tr></thead>
+        <tbody>${(data.recentConversions || []).map(w => `
+          <tr>
+            <td>${w.id}</td>
+            <td class="mono">${w.address}</td>
+            <td>${w.points}</td>
+            <td>${w.amount}</td>
+            <td>${w.created_at || ""}</td>
+          </tr>`).join("") || "<tr><td colspan=5 class='muted'>None yet</td></tr>"}
+        </tbody></table>`;
+
+      $("tab-deposits").innerHTML = `
+        <h3>Weekly leaderboard deposits</h3>
+        <table><thead><tr><th>ID</th><th>User</th><th>Points</th><th>Week</th><th>Tx</th><th>Time</th></tr></thead>
+        <tbody>${(data.recentDeposits || []).map(w => `
+          <tr>
+            <td>${w.id}</td>
+            <td class="mono">${w.address}</td>
+            <td>${w.points}</td>
+            <td>${w.week_start_ms}</td>
+            <td class="mono">${w.tx_hash || "—"}</td>
+            <td>${w.created_at || ""}</td>
+          </tr>`).join("") || "<tr><td colspan=6 class='muted'>None yet</td></tr>"}
+        </tbody></table>`;
+
+      $("tab-users").innerHTML = `
+        <h3>Top users by USDC balance</h3>
+        <table><thead><tr><th>Address</th><th>USDC bal</th><th>Deposited pts</th><th>Joined</th></tr></thead>
+        <tbody>${(data.topUsers || []).map(u => `
+          <tr>
+            <td class="mono">${u.address}</td>
+            <td>${u.usdcBalance}</td>
+            <td>${u.total_deposited_pts}</td>
+            <td>${u.created_at || ""}</td>
+          </tr>`).join("") || "<tr><td colspan=4 class='muted'>No users</td></tr>"}
+        </tbody></table>`;
+
+      $("wdTo").value = $("wdTo").value || account;
+    }
+
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        ["withdrawals","conversions","deposits","users","actions"].forEach((t) => {
+          $("tab-" + t).classList.toggle("hidden", t !== btn.dataset.tab);
+        });
+      });
+    });
+
+    $("btnConnect").onclick = connect;
+    $("btnRefresh").onclick = async () => {
+      try { await refresh(); } catch (e) { alert(e.message); }
+    };
+    $("btnCopyVault").onclick = async () => {
+      const v = data?.chain?.vault || "";
+      if (!v) return alert("No vault address");
+      await navigator.clipboard.writeText(v);
+      alert("Copied vault address");
+    };
+
+    $("btnAdminWd").onclick = async () => {
+      $("actionErr").textContent = "";
+      $("actionMsg").textContent = "";
+      try {
+        const vault = data?.chain?.vault;
+        if (!vault) throw new Error("Vault not deployed");
+        const to = $("wdTo").value.trim();
+        const amountUsdc = Number($("wdAmt").value);
+        if (!to || !amountUsdc) throw new Error("to + amount required");
+        const micros = BigInt(Math.floor(amountUsdc * 1e6));
+        // Prefer on-wallet owner tx (admin is vault owner)
+        const amountHex = "0x" + micros.toString(16);
+        const toClean = to.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+        const amtClean = micros.toString(16).padStart(64, "0");
+        // adminWithdraw(address,uint256) selector = keccak first 4 bytes
+        // 0x00f714ce = adminWithdraw(address,uint256) — compute via eth_call style data
+        const { ethers } = await import("https://esm.sh/ethers@6.13.0");
+        const iface = new ethers.Interface([
+          "function adminWithdraw(address to, uint256 amount)",
+        ]);
+        const dataTx = iface.encodeFunctionData("adminWithdraw", [to, micros]);
+        // ensure Arc
+        try {
+          await provider.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: "0x4cf152" }],
+          });
+        } catch {
+          await provider.request({
+            method: "wallet_addEthereumChain",
+            params: [{
+              chainId: "0x4cf152",
+              chainName: "Arc Testnet",
+              nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+              rpcUrls: ["https://rpc.testnet.arc.network"],
+              blockExplorerUrls: ["https://testnet.arcscan.app"],
+            }],
+          });
+        }
+        const txHash = await provider.request({
+          method: "eth_sendTransaction",
+          params: [{ from: account, to: vault, data: dataTx }],
+        });
+        $("actionMsg").textContent = `Withdrawn ${amountUsdc} USDC · tx ${txHash}`;
+        // also log via API (best-effort)
+        try {
+          const auth = await signAdmin();
+          await fetch("/api/admin", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              ...auth,
+              action: "logs",
+            }),
+          });
+        } catch {}
+        await refresh();
+      } catch (e) {
+        // fallback to backend owner key path
+        try {
+          const auth = await signAdmin();
+          const r = await fetch("/api/admin", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              ...auth,
+              action: "admin_withdraw",
+              to: $("wdTo").value.trim(),
+              amountUsdc: Number($("wdAmt").value),
+            }),
+          });
+          const j = await r.json();
+          if (!j.ok) throw new Error(j.error || e?.message || "Failed");
+          $("actionMsg").textContent = `Withdrawn ${j.amount} USDC · tx ${j.txHash}`;
+          await refresh();
+        } catch (e2) {
+          $("actionErr").textContent = e2?.message || e?.message || String(e2);
+        }
+      }
+    };
+
+    $("btnCredit").onclick = async () => {
+      $("actionErr").textContent = "";
+      $("actionMsg").textContent = "";
+      try {
+        const auth = await signAdmin();
+        const r = await fetch("/api/admin", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...auth,
+            action: "credit_usdc",
+            to: $("crTo").value.trim(),
+            amountUsdc: Number($("crAmt").value),
+          }),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || "Failed");
+        $("actionMsg").textContent = `Credited ${j.credited} USDC to ${j.to}`;
+        await refresh();
+      } catch (e) {
+        $("actionErr").textContent = e?.message || String(e);
+      }
+    };
+
+    // boot
+    (async () => {
+      try {
+        const r = await fetch("/api/admin?public=1", { cache: "no-store" });
+        const j = await r.json();
+        if (j.ok && j.admin) adminExpected = String(j.admin).toLowerCase();
+      } catch {}
+      $("expectedAdmin").textContent = adminExpected;
+    })();
+  </script>
+</body>
+</html>

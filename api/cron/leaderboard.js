@@ -1,29 +1,16 @@
-// Vercel Cron: /api/cron/leaderboard
-// Keeps leaderboard cache warm. Configure in vercel.json "crons".
-// This endpoint simply forwards to /api/leaderboard?refresh=1&names=0.
+// Optional cron: warm Neon-backed leaderboard (no-op heavy work; ensures schema)
+const { ensureSchema, weekStartUtcMs, getSql } = require("../lib/db");
 
 module.exports = async function handler(req, res) {
   try {
-    const host = req.headers["x-forwarded-host"] || req.headers.host;
-    const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
-    const url = `${proto}://${host}/api/leaderboard?refresh=1&names=0`;
-
-    const r = await fetch(url, { headers: { "user-agent": "vercel-cron" }, cache: "no-store" });
-    const text = await r.text();
-
-    res.setHeader("content-type", "application/json");
-    res.setHeader("cache-control", "no-store");
-    return res.status(200).send(
-      JSON.stringify({
-        ok: r.ok,
-        status: r.status,
-        forwarded: "/api/leaderboard?refresh=1&names=0",
-        body: (() => { try { return JSON.parse(text); } catch (_) { return text; } })(),
-      })
-    );
+    await ensureSchema();
+    const db = getSql();
+    const week = weekStartUtcMs();
+    const rows = await db`
+      SELECT COUNT(DISTINCT address)::int AS c FROM weekly_scores WHERE week_start_ms = ${week}
+    `;
+    res.status(200).json({ ok: true, weekStart: week, players: rows[0]?.c || 0 });
   } catch (e) {
-    res.setHeader("content-type", "application/json");
-    res.setHeader("cache-control", "no-store");
-    return res.status(200).send(JSON.stringify({ ok: false, error: e?.message || String(e) }));
+    res.status(200).json({ ok: false, error: e?.message || String(e) });
   }
 };
