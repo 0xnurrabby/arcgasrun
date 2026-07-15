@@ -47,7 +47,11 @@
       <p class="sub">Arc Testnet · only the configured admin wallet can enter</p>
       <p class="muted mono" id="expectedAdmin">…</p>
       <button id="btnConnect">Connect admin wallet</button>
-      <div class="err" id="gateErr"></div>
+      <p class="muted" style="margin-top:12px;line-height:1.45">
+        MetaMask e exactly ei address select thakte hobe.<br/>
+        Onno account select thakle switch kore abar connect dao.
+      </p>
+      <div class="err" id="gateErr" style="white-space:pre-wrap"></div>
     </div>
 
     <div id="app" class="hidden">
@@ -111,26 +115,113 @@
 
     const $ = (id) => document.getElementById(id);
 
+    function norm(a) {
+      return String(a || "").trim().toLowerCase();
+    }
+
+    function isAdmin(a) {
+      return norm(a) === norm(adminExpected);
+    }
+
     async function eth() {
       if (!window.ethereum) throw new Error("No wallet found. Install MetaMask.");
-      return window.ethereum;
+      // Prefer MetaMask if multiple wallets inject
+      const ethereum = window.ethereum;
+      if (ethereum.providers?.length) {
+        const mm = ethereum.providers.find((p) => p.isMetaMask && !p.isBraveWallet);
+        if (mm) return mm;
+      }
+      return ethereum;
+    }
+
+    async function getAccounts(p) {
+      let accs = [];
+      try {
+        // Force account permission / picker so user can choose the admin account
+        await p.request({
+          method: "wallet_requestPermissions",
+          params: [{ eth_accounts: {} }],
+        });
+      } catch (_) {
+        // user may reject picker; still try eth_requestAccounts
+      }
+      try {
+        accs = await p.request({ method: "eth_requestAccounts" });
+      } catch (e) {
+        throw new Error(e?.message || "Wallet connection rejected");
+      }
+      if (!accs?.length) {
+        try {
+          accs = await p.request({ method: "eth_accounts" });
+        } catch (_) {}
+      }
+      return (accs || []).map(norm).filter(Boolean);
+    }
+
+    function enterApp(addr) {
+      account = norm(addr);
+      $("gate").classList.add("hidden");
+      $("app").classList.remove("hidden");
+      $("who").textContent = account;
+      $("gateErr").textContent = "";
     }
 
     async function connect() {
       $("gateErr").textContent = "";
       try {
         provider = await eth();
-        const accs = await provider.request({ method: "eth_requestAccounts" });
-        account = (accs[0] || "").toLowerCase();
-        if (account !== adminExpected) {
-          throw new Error(`Wrong wallet. Connect ${adminExpected}`);
+        const list = await getAccounts(provider);
+        const match = list.find(isAdmin);
+        if (!match) {
+          const connected = list[0] || "(none)";
+          throw new Error(
+            `Connected: ${connected}\nRequired admin: ${norm(adminExpected)}\n\nMetaMask e admin account select kore abar try koro (account switcher).`
+          );
         }
-        $("gate").classList.add("hidden");
-        $("app").classList.remove("hidden");
-        $("who").textContent = account;
+        // Switch to Arc if needed (best-effort)
+        try {
+          await provider.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: "0x4cf152" }],
+          });
+        } catch (sw) {
+          if (sw?.code === 4902) {
+            await provider.request({
+              method: "wallet_addEthereumChain",
+              params: [{
+                chainId: "0x4cf152",
+                chainName: "Arc Testnet",
+                nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+                rpcUrls: ["https://rpc.testnet.arc.network"],
+                blockExplorerUrls: ["https://testnet.arcscan.app"],
+              }],
+            });
+          }
+        }
+        enterApp(match);
+        // listen for account switches
+        try {
+          provider.removeListener?.("accountsChanged", onAccountsChanged);
+          provider.on?.("accountsChanged", onAccountsChanged);
+        } catch {}
         await refresh();
       } catch (e) {
         $("gateErr").textContent = e?.message || String(e);
+      }
+    }
+
+    function onAccountsChanged(accs) {
+      const list = (accs || []).map(norm);
+      const match = list.find(isAdmin);
+      if (match) {
+        enterApp(match);
+        refresh().catch(() => {});
+      } else {
+        account = null;
+        $("app").classList.add("hidden");
+        $("gate").classList.remove("hidden");
+        $("gateErr").textContent =
+          `Wallet switched away from admin.\nConnected: ${list[0] || "(none)"}\nNeed: ${norm(adminExpected)}`;
       }
     }
 
