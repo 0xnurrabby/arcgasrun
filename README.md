@@ -18,7 +18,7 @@ Lane-runner arcade game on **Arc Testnet** with weekly leaderboard, permanent US
 - Play → save points (25% decay every 10 min if not deposited/converted)
 - **Deposit** saved points → weekly leaderboard (Neon + optional on-chain score log)
 - **Convert** points → permanent USDC (`1000 pts = 1 USDC`)
-- **Withdraw** permanent USDC to wallet (min 0.1 USDC, instant via vault contract)
+- **Withdraw** permanent USDC to wallet (no minimum, instant via vault contract)
 - **Admin** at `/admin` (wallet-gated)
 
 ## Admin
@@ -65,7 +65,7 @@ USDC_ADDRESS=0x3600000000000000000000000000000000000000
 | Action | Rule |
 |--------|------|
 | Convert | 1000 points → 1 permanent USDC |
-| Withdraw | min 0.1 USDC, instant on-chain to user wallet |
+| Withdraw | no minimum, instant on-chain to user wallet |
 | Leaderboard | deposit saved points for weekly ranking |
 | Penalty | -25% saved points every 10 minutes if not saved to LB / USDC |
 

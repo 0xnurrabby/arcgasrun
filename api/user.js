@@ -48,8 +48,8 @@ module.exports = async function handler(req, res) {
       },
       rates: {
         pointsPerUsdc: POINTS_PER_USDC,
-        minWithdrawUsdc: "0.100000",
-        minWithdrawMicros: String(MIN_WITHDRAW_MICROS),
+        minWithdrawUsdc: "0",
+        minWithdrawMicros: "1",
       },
       core: getCoreAddress(),
     });

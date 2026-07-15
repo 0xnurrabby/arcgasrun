@@ -287,7 +287,7 @@ const SCORE_CONTRACT = CORE_CONTRACT;
 const VAULT_CONTRACT = CORE_CONTRACT;
 const CONTRACT = CORE_CONTRACT;
 const POINTS_PER_USDC = 1000;
-const MIN_WITHDRAW_USDC = 0.1;
+const MIN_WITHDRAW_USDC = 0; // no minimum
 
 const CORE_FN = {
   saveRun: {
@@ -1283,9 +1283,8 @@ async function openWithdrawUsdcView() {
   }
   await refreshServerBalance();
   const balMicros = BigInt(serverUsdcMicros || "0");
-  const minMicros = BigInt(Math.round(MIN_WITHDRAW_USDC * 1_000_000));
-  if (balMicros < minMicros) {
-    toast(`Permanent USDC is ${serverUsdcBalance} (need ≥ 0.1). Convert points first.`);
+  if (balMicros <= 0n) {
+    toast(`No permanent USDC yet. Convert points first.`);
     return;
   }
 
@@ -1295,12 +1294,12 @@ async function openWithdrawUsdcView() {
     <div class="menuGrid">
       <div class="kv"><div class="k">Wallet</div><div class="v">${shortAddr(account)}</div></div>
       <div class="kv"><div class="k">Permanent USDC</div><div class="v">${serverUsdcBalance}</div></div>
-      <div class="kv"><div class="k">Min withdraw</div><div class="v">0.1 USDC</div></div>
+      <div class="kv"><div class="k">Min withdraw</div><div class="v">No minimum</div></div>
       <div class="kv"><div class="k">Network</div><div class="v">Arc Testnet</div></div>
     </div>
     <label class="fieldLabel" for="wdAmountInput">How much USDC to withdraw?</label>
     <div class="wdInputRow">
-      <input id="wdAmountInput" class="wdInput" type="number" inputmode="decimal" min="0.1" step="0.1" placeholder="0.1" value="" />
+      <input id="wdAmountInput" class="wdInput" type="number" inputmode="decimal" min="0" step="any" placeholder="any amount" value="" />
       <button class="pill" type="button" id="btnWdMax">MAX</button>
     </div>
     <div class="btnRow">
@@ -1333,8 +1332,8 @@ async function confirmWithdrawUsdc(rawAmount) {
   await refreshServerBalance();
   const balMicros = BigInt(serverUsdcMicros || "0");
   const amount = Math.round(Number(rawAmount) * 1e6) / 1e6;
-  if (!Number.isFinite(amount) || amount < MIN_WITHDRAW_USDC) {
-    toast("Enter amount (min 0.1 USDC)");
+  if (!Number.isFinite(amount) || amount <= 0) {
+    toast("Enter an amount greater than 0");
     return;
   }
   const usdcMicros = String(Math.round(amount * 1_000_000));
@@ -2184,7 +2183,7 @@ async function openMainMenu() {
       <div class="kv"><div class="k">Permanent USDC</div><div class="v">${serverUsdcBalance}</div></div>
       <div class="kv"><div class="k">Coins</div><div class="v">${Math.floor(profile.coins)} (1 coin = 10 pts → ${Math.floor(profile.coins) * 10})</div></div>
       <div class="kv"><div class="k">⚠️Saved points deduction</div><div class="v">-25% every 10 min</div></div>
-      <div class="kv"><div class="k">Rate</div><div class="v">1000 pts = 1 USDC · min wd 0.1 USDC</div></div>
+      <div class="kv"><div class="k">Rate</div><div class="v">1000 pts = 1 USDC · no min withdraw</div></div>
     </div>
 
     <div class="btnRow">
