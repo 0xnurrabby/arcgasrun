@@ -1,41 +1,31 @@
-import { next } from "@vercel/edge";
-
+/**
+ * Lightweight Edge middleware (no external imports).
+ * Maintenance mode only — pass-through when off.
+ */
 export const config = {
-  matcher: "/:path*",
+  matcher: [
+    /*
+      Skip static assets & API so middleware never blocks them.
+    */
+    "/((?!api/|assets/|src/|\\.well-known/|favicon\\.ico|contracts-config\\.js|maintenance\\.html).*)",
+  ],
 };
 
 export default function middleware(request) {
-  const url = new URL(request.url);
-
   const maintenanceMode = process.env.MAINTENANCE_MODE === "true";
-  const bypassKey = process.env.MAINTENANCE_BYPASS_KEY || "";
-
-  // Maintenance off → continue normally (do NOT fetch(request) — that breaks Edge)
   if (!maintenanceMode) {
-    return next();
+    // Pass through: returning nothing / empty continues on some runtimes.
+    // Safest portable approach: rewrite to same path via Response that doesn't re-fetch.
+    return;
   }
 
+  const url = new URL(request.url);
+  const bypassKey = process.env.MAINTENANCE_BYPASS_KEY || "";
   const keyFromUrl = url.searchParams.get("key");
   const cookies = request.headers.get("cookie") || "";
   const hasBypassCookie = cookies.includes("maint_bypass=1");
 
-  // Always allow static/API/maintenance assets
-  if (
-    url.pathname === "/maintenance.html" ||
-    url.pathname === "/favicon.ico" ||
-    url.pathname.startsWith("/assets/") ||
-    url.pathname.startsWith("/.well-known/") ||
-    url.pathname.startsWith("/api/") ||
-    url.pathname.startsWith("/src/") ||
-    url.pathname === "/contracts-config.js" ||
-    url.pathname === "/index.html"
-  ) {
-    return next();
-  }
-
-  if (hasBypassCookie) {
-    return next();
-  }
+  if (hasBypassCookie) return;
 
   if (bypassKey && keyFromUrl === bypassKey) {
     const cleanUrl = new URL(request.url);
@@ -43,7 +33,7 @@ export default function middleware(request) {
     return new Response(null, {
       status: 302,
       headers: {
-        Location: cleanUrl.toString(),
+        Location: cleanUrl.pathname + cleanUrl.search,
         "Set-Cookie":
           "maint_bypass=1; Path=/; Max-Age=7200; HttpOnly; Secure; SameSite=Lax",
       },
