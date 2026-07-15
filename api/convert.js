@@ -5,7 +5,6 @@ const {
   normAddr,
   pointsToUsdcMicros,
   usdcMicrosToDisplay,
-  POINTS_PER_USDC,
 } = require("./lib/db");
 const { verifyMessage, parseJsonBody, ok, fail, cors } = require("./lib/auth");
 
@@ -29,12 +28,9 @@ module.exports = async function handler(req, res) {
     const signature = body.signature;
 
     if (!/^0x[a-f0-9]{40}$/.test(address)) return fail(res, 400, "Invalid address");
-    if (points < POINTS_PER_USDC) {
-      return fail(res, 400, `Minimum convert is ${POINTS_PER_USDC} points (1 USDC)`);
-    }
-    // Only whole USDC units
-    if (points % POINTS_PER_USDC !== 0) {
-      return fail(res, 400, `Points must be multiple of ${POINTS_PER_USDC}`);
+    // No minimum — any positive points convert (1000 pts = 1 USDC)
+    if (points <= 0) {
+      return fail(res, 400, "No points to convert");
     }
     if (!signature) return fail(res, 400, "Signature required");
     if (!timestamp || Math.abs(Date.now() - timestamp) > 10 * 60 * 1000) {

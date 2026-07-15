@@ -1077,10 +1077,24 @@ async function ensureArc() {
 async function signGasrunMessage(message) {
   const p = await getProvider();
   if (!p || !account) throw new Error("Connect wallet first");
-  return await p.request({
-    method: "personal_sign",
-    params: [message, account]
-  });
+  // personal_sign: some wallets want [msg, addr], order is standardized as data then address
+  try {
+    return await p.request({
+      method: "personal_sign",
+      params: [message, account]
+    });
+  } catch (e1) {
+    // fallback: hex-encoded UTF-8 message
+    const hex =
+      "0x" +
+      Array.from(new TextEncoder().encode(message))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    return await p.request({
+      method: "personal_sign",
+      params: [hex, account]
+    });
+  }
 }
 
 async function fetchUserServer() {
@@ -1114,24 +1128,26 @@ async function convertPointsToUsdc() {
     if (!account) return;
   }
   const pts = Math.floor(profile.bankPoints);
-  if (pts < POINTS_PER_USDC) {
-    toast(`Need at least ${POINTS_PER_USDC} saved points (1 USDC)`);
+  if (pts <= 0) {
+    toast("No saved points to convert");
     return;
   }
-  const usePts = Math.floor(pts / POINTS_PER_USDC) * POINTS_PER_USDC;
+  // No minimum — any points convert at 1000 pts = 1 USDC
+  const usePts = pts;
   const usdcAmt = usePts / POINTS_PER_USDC;
   if (!confirm(`Convert ${usePts} points → ${usdcAmt} permanent USDC?`)) return;
 
   try {
     toast("Sign to convert…", 1500);
     const timestamp = Date.now();
-    const message = `gasrun:convert:${account.toLowerCase()}:${usePts}:${timestamp}`;
+    const addr = String(account).toLowerCase();
+    const message = `gasrun:convert:${addr}:${usePts}:${timestamp}`;
     const signature = await signGasrunMessage(message);
     const res = await fetch("/api/convert", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        address: account,
+        address: addr,
         points: usePts,
         timestamp,
         signature
@@ -1156,48 +1172,59 @@ async function withdrawUsdc() {
     if (!account) return;
   }
   await refreshServerBalance();
-  const bal = Number(serverUsdcBalance || 0);
-  if (bal < MIN_WITHDRAW_USDC) {
-    toast("Need at least 0.1 permanent USDC to withdraw");
+  const balMicros = BigInt(serverUsdcMicros || "0");
+  const minMicros = BigInt(Math.round(MIN_WITHDRAW_USDC * 1_000_000));
+  if (balMicros < minMicros) {
+    toast(`Permanent USDC is ${serverUsdcBalance} (need ≥ 0.1). Convert points first.`);
     return;
   }
-  const raw = prompt(`Withdraw USDC to your wallet (min 0.1, max ${bal}):`, String(Math.min(bal, Math.max(0.1, Number(bal.toFixed(1))))));
+  const bal = Number(serverUsdcBalance || 0);
+  const raw = prompt(
+    `Withdraw permanent USDC to wallet (min 0.1, max ${serverUsdcBalance}):`,
+    serverUsdcBalance
+  );
   if (raw == null) return;
   const amount = Math.round(Number(raw) * 1e6) / 1e6;
   if (!Number.isFinite(amount) || amount < MIN_WITHDRAW_USDC) {
     toast("Invalid amount (min 0.1 USDC)");
     return;
   }
-  if (amount > bal + 1e-9) {
-    toast("Amount exceeds permanent USDC balance");
+  const usdcMicros = String(Math.round(amount * 1_000_000));
+  if (BigInt(usdcMicros) > balMicros) {
+    toast(`Amount exceeds permanent balance (${serverUsdcBalance} USDC)`);
     return;
   }
 
   try {
     toast("Sign withdraw…", 1500);
-    const usdcMicros = String(Math.round(amount * 1_000_000));
     const timestamp = Date.now();
-    const message = `gasrun:withdraw:${account.toLowerCase()}:${usdcMicros}:${timestamp}`;
+    const addr = String(account).toLowerCase();
+    const message = `gasrun:withdraw:${addr}:${usdcMicros}:${timestamp}`;
     const signature = await signGasrunMessage(message);
     toast("Sending on-chain payout…", 2000);
     const res = await fetch("/api/withdraw", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        address: account,
+        address: addr,
         usdcMicros,
         timestamp,
         signature
       })
     });
-    const j = await res.json();
-    if (!j?.ok) throw new Error(j?.error || "Withdraw failed");
+    const j = await res.json().catch(() => ({}));
+    if (!j?.ok) {
+      const extra = j?.vaultBalance ? ` (vault: ${j.vaultBalance})` : "";
+      const balHint = j?.balance ? ` (your bal: ${j.balance})` : "";
+      throw new Error((j?.error || "Withdraw failed") + extra + balHint);
+    }
     serverUsdcBalance = j.usdcBalance;
+    serverUsdcMicros = j.usdcBalanceMicros || j.amountMicros || serverUsdcMicros;
     toast(`Withdrawn ${j.amount} USDC ✓`, 2800);
     if (j.explorer) console.log("tx", j.explorer);
     openMainMenu();
   } catch (e) {
-    toast(e?.message ? String(e.message) : "Withdraw failed");
+    toast(e?.message ? String(e.message) : "Withdraw failed", 4000);
   }
 }
 
@@ -1593,7 +1620,8 @@ function convertCoinsToBank() {
     toast("No coins to convert");
     return;
   }
-  const pts = profile.coins * 10000;
+  // 1 coin = 10 points
+  const pts = Math.floor(profile.coins) * 10;
   profile.coins = 0;
   profile.bankPoints += pts;
   persistProfile();
@@ -1978,7 +2006,7 @@ els.menuBtn.addEventListener("click", async () => {
   applyDecay();
   computeBoost();
   renderHud();
-  openMainMenu();
+  await openMainMenu();
 });
 els.closeSheet.addEventListener("click", closeSheet);
 els.sheet.addEventListener("click", (e) => {
@@ -1988,13 +2016,13 @@ els.statusBadge.addEventListener("click", async () => {
   await openWalletConnectFlow();
 });
 
-function openMainMenu() {
+async function openMainMenu() {
   // User is about to interact with wallet/deposit; warm deps aggressively but non-blocking.
   warmWeb3Deps();
-  refreshServerBalance();
+  try { await refreshServerBalance(); } catch {}
   const walletLine = account ? shortAddr(account) : "Not connected";
   const week = weekIdUtc();
-  const convertible = Math.floor(Math.floor(profile.bankPoints) / POINTS_PER_USDC);
+  const convertible = (Math.floor(profile.bankPoints) / POINTS_PER_USDC).toFixed(3);
 
   openSheet(
     "Menu",
@@ -2006,7 +2034,7 @@ function openMainMenu() {
       <div class="kv"><div class="k">Run points</div><div class="v">${Math.floor(game.runScore)}</div></div>
       <div class="kv"><div class="k">Saved points</div><div class="v">${Math.floor(profile.bankPoints)}</div></div>
       <div class="kv"><div class="k">Permanent USDC</div><div class="v">${serverUsdcBalance}</div></div>
-      <div class="kv"><div class="k">Coins</div><div class="v">${Math.floor(profile.coins)} (→ ${Math.floor(profile.coins) * 10} pts)</div></div>
+      <div class="kv"><div class="k">Coins</div><div class="v">${Math.floor(profile.coins)} (1 coin = 10 pts → ${Math.floor(profile.coins) * 10})</div></div>
       <div class="kv"><div class="k">⚠️Saved points deduction</div><div class="v">-25% every 10 min</div></div>
       <div class="kv"><div class="k">Rate</div><div class="v">1000 pts = 1 USDC · min wd 0.1 USDC</div></div>
     </div>
@@ -2025,7 +2053,7 @@ function openMainMenu() {
     </div>
 
     <div class="btnRow">
-      <button class="pill" id="btnToUsdc">Convert points → USDC (${convertible})</button>
+      <button class="pill" id="btnToUsdc">Convert points → USDC (~${convertible})</button>
       <button class="pill primary" id="btnWithdrawUsdc">Withdraw USDC</button>
     </div>
 
