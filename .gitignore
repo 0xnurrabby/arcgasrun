@@ -6,3 +6,5 @@ contracts/artifacts.json
 DEPLOY_KEYS.md
 .DS_Store
 *.log
+
+.vercel

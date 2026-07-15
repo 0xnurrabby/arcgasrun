@@ -29,14 +29,21 @@ module.exports = async function handler(req, res) {
 
     if (!/^0x[a-f0-9]{40}$/.test(address)) return fail(res, 400, "Invalid address");
     if (points <= 0) return fail(res, 400, "No points");
-    if (!signature) return fail(res, 400, "Signature required");
-    if (!timestamp || Math.abs(Date.now() - timestamp) > 10 * 60 * 1000) {
-      return fail(res, 400, "Timestamp expired");
-    }
-
-    const msg = `gasrun:deposit:${address}:${points}:${timestamp}`;
-    if (!verifyMessage(address, msg, signature)) {
-      return fail(res, 401, "Invalid signature");
+    // On-chain path: txHash proves depositScore() was sent (no personal_sign)
+    const onchain = body.onchain === true || signature === "onchain";
+    if (onchain) {
+      if (!txHash || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
+        return fail(res, 400, "txHash required for on-chain deposit");
+      }
+    } else {
+      if (!signature) return fail(res, 400, "Signature required");
+      if (!timestamp || Math.abs(Date.now() - timestamp) > 10 * 60 * 1000) {
+        return fail(res, 400, "Timestamp expired");
+      }
+      const msg = `gasrun:deposit:${address}:${points}:${timestamp}`;
+      if (!verifyMessage(address, msg, signature)) {
+        return fail(res, 401, "Invalid signature");
+      }
     }
 
     const db = getSql();

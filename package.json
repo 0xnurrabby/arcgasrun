@@ -4,7 +4,9 @@
   "version": "2.0.0",
   "scripts": {
     "deploy:contracts": "node scripts/deploy.mjs",
-    "init:db": "node scripts/init-db.mjs"
+    "deploy:core": "node scripts/deploy-core.mjs",
+    "init:db": "node scripts/init-db.mjs",
+    "migrate:credits": "node scripts/migrate-credits.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

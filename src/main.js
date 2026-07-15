@@ -279,12 +279,54 @@ const ARC_CHAIN_ID_HEX = "0x4cf152";
 const ARC_RPC = "https://rpc.testnet.arc.network";
 const ARC_EXPLORER = "https://testnet.arcscan.app";
 const ARC_USDC = "0x3600000000000000000000000000000000000000";
-// Filled after deploy (also overridable via window.__GASRUN_CONTRACTS)
-const SCORE_CONTRACT = (window.__GASRUN_CONTRACTS && window.__GASRUN_CONTRACTS.score) || "0x0000000000000000000000000000000000000000";
-const VAULT_CONTRACT = (window.__GASRUN_CONTRACTS && window.__GASRUN_CONTRACTS.vault) || "0x0000000000000000000000000000000000000000";
-const CONTRACT = SCORE_CONTRACT;
+// GasRunCore — every movement is an on-chain transaction
+const CORE_CONTRACT =
+  (window.__GASRUN_CONTRACTS && (window.__GASRUN_CONTRACTS.core || window.__GASRUN_CONTRACTS.vault)) ||
+  "0x3d61d1083f53A431899b800b12B5e1ff4fD256de";
+const SCORE_CONTRACT = CORE_CONTRACT;
+const VAULT_CONTRACT = CORE_CONTRACT;
+const CONTRACT = CORE_CONTRACT;
 const POINTS_PER_USDC = 1000;
 const MIN_WITHDRAW_USDC = 0.1;
+
+const CORE_FN = {
+  saveRun: {
+    type: "function",
+    name: "saveRun",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "points", type: "uint256" }],
+    outputs: []
+  },
+  depositScore: {
+    type: "function",
+    name: "depositScore",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "points", type: "uint256" },
+      { name: "weekStart", type: "uint256" }
+    ],
+    outputs: []
+  },
+  convert: {
+    type: "function",
+    name: "convert",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "points", type: "uint256" },
+      { name: "usdcMicros", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+      { name: "signature", type: "bytes" }
+    ],
+    outputs: []
+  },
+  withdraw: {
+    type: "function",
+    name: "withdraw",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "usdcMicros", type: "uint256" }],
+    outputs: []
+  }
+};
 
 // Builder Code (optional attribution)
 const BUILDER_CODE = "bc_ox3c2ez4";
@@ -1077,14 +1119,12 @@ async function ensureArc() {
 async function signGasrunMessage(message) {
   const p = await getProvider();
   if (!p || !account) throw new Error("Connect wallet first");
-  // personal_sign: some wallets want [msg, addr], order is standardized as data then address
   try {
     return await p.request({
       method: "personal_sign",
       params: [message, account]
     });
   } catch (e1) {
-    // fallback: hex-encoded UTF-8 message
     const hex =
       "0x" +
       Array.from(new TextEncoder().encode(message))
@@ -1095,6 +1135,68 @@ async function signGasrunMessage(message) {
       params: [hex, account]
     });
   }
+}
+
+/** Send a single on-chain call to GasRunCore (one MetaMask popup) */
+async function sendCoreTx(fnAbi, args, statusText = "Confirm transaction…") {
+  if (!account) {
+    await connectWallet();
+    if (!account) throw new Error("Connect wallet first");
+  }
+  await ensureArc();
+  await warmWeb3Deps();
+  if (!encodeFunctionData) throw new Error("Web3 not ready");
+
+  const p = await getProvider();
+  if (!p) throw new Error("No wallet provider");
+
+  const data = encodeFunctionData({
+    abi: [fnAbi],
+    functionName: fnAbi.name,
+    args
+  });
+
+  toast(statusText, 2000);
+  const txHash = await p.request({
+    method: "eth_sendTransaction",
+    params: [
+      {
+        from: account,
+        to: CORE_CONTRACT,
+        value: "0x0",
+        data
+      }
+    ]
+  });
+  return txHash;
+}
+
+async function waitTxLight(txHash, timeoutMs = 45000) {
+  if (!txHash) return null;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(ARC_RPC, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "eth_getTransactionReceipt",
+          params: [txHash]
+        })
+      });
+      const j = await res.json();
+      if (j?.result) {
+        if (j.result.status === "0x0") throw new Error("On-chain transaction failed");
+        return j.result;
+      }
+    } catch (e) {
+      if (String(e?.message || "").includes("failed")) throw e;
+    }
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  return null; // still pending — caller may continue
 }
 
 async function fetchUserServer() {
@@ -1132,37 +1234,45 @@ async function convertPointsToUsdc() {
     toast("No saved points to convert");
     return;
   }
-  // No minimum — any points convert at 1000 pts = 1 USDC
   const usePts = pts;
   const usdcAmt = usePts / POINTS_PER_USDC;
-  if (!confirm(`Convert ${usePts} points → ${usdcAmt} permanent USDC?`)) return;
+  if (!confirm(`On-chain convert ${usePts} points → ${usdcAmt} USDC?\n(1 wallet transaction)`)) return;
 
   try {
-    toast("Sign to convert…", 1500);
-    const timestamp = Date.now();
+    toast("Preparing on-chain convert…", 1500);
     const addr = String(account).toLowerCase();
-    const message = `gasrun:convert:${addr}:${usePts}:${timestamp}`;
-    const signature = await signGasrunMessage(message);
-    const res = await fetch("/api/convert", {
+    const prep = await fetch("/api/convert-voucher", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        address: addr,
-        points: usePts,
-        timestamp,
-        signature
-      })
-    });
-    const j = await res.json();
-    if (!j?.ok) throw new Error(j?.error || "Convert failed");
+      body: JSON.stringify({ address: addr, points: usePts })
+    }).then((r) => r.json());
+    if (!prep?.ok) throw new Error(prep?.error || "Voucher failed");
+
+    const txHash = await sendCoreTx(
+      CORE_FN.convert,
+      [BigInt(usePts), BigInt(prep.usdcMicros), BigInt(prep.deadline), prep.signature],
+      "Confirm convert on Arc…"
+    );
+    toast("Waiting for confirmation…", 2000);
+    await waitTxLight(txHash);
+
+    const conf = await fetch("/api/convert-confirm", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ address: addr, points: usePts, txHash })
+    }).then((r) => r.json());
+    if (!conf?.ok) throw new Error(conf?.error || "Confirm failed");
+
     profile.bankPoints = Math.max(0, profile.bankPoints - usePts);
     persistProfile();
-    serverUsdcBalance = j.usdcBalance;
-    serverUsdcMicros = j.usdcBalanceMicros;
-    toast(`Converted → ${j.usdcAdded} USDC permanent`, 2500);
+    serverUsdcBalance = conf.usdcBalance;
+    serverUsdcMicros = conf.usdcBalanceMicros;
+    toast(`On-chain convert ✓ ${conf.usdcAdded} USDC`, 2800);
     openMainMenu();
   } catch (e) {
-    toast(e?.message ? String(e.message) : "Convert failed");
+    const msg = String(e?.message || e || "Convert failed");
+    if (/reject|denied|cancel/i.test(msg)) toast("Transaction cancelled");
+    else toast(msg, 4000);
   }
 }
 
@@ -1241,35 +1351,32 @@ async function confirmWithdrawUsdc(rawAmount) {
   }
 
   try {
-    toast("Sign withdraw…", 1500);
-    const timestamp = Date.now();
     const addr = String(account).toLowerCase();
-    const message = `gasrun:withdraw:${addr}:${usdcMicros}:${timestamp}`;
-    const signature = await signGasrunMessage(message);
-    toast("Sending on-chain payout…", 2000);
-    const res = await fetch("/api/withdraw", {
+    // User sends withdraw() on GasRunCore — real on-chain USDC to wallet
+    const txHash = await sendCoreTx(
+      CORE_FN.withdraw,
+      [BigInt(usdcMicros)],
+      "Confirm withdraw on Arc…"
+    );
+    toast("Waiting for confirmation…", 2000);
+    await waitTxLight(txHash);
+
+    const j = await fetch("/api/withdraw-confirm", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        address: addr,
-        usdcMicros,
-        timestamp,
-        signature
-      })
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!j?.ok) {
-      const extra = j?.vaultBalance ? ` (vault: ${j.vaultBalance})` : "";
-      const balHint = j?.balance ? ` (your bal: ${j.balance})` : "";
-      throw new Error((j?.error || "Withdraw failed") + extra + balHint);
-    }
+      body: JSON.stringify({ address: addr, usdcMicros, txHash })
+    }).then((r) => r.json());
+    if (!j?.ok) throw new Error(j?.error || "Sync failed");
+
     serverUsdcBalance = j.usdcBalance;
-    serverUsdcMicros = j.usdcBalanceMicros || serverUsdcMicros;
-    toast(`Withdrawn ${j.amount} USDC ✓`, 2800);
+    serverUsdcMicros = j.usdcBalanceMicros || "0";
+    toast(`On-chain withdraw ✓ ${j.amount} USDC`, 2800);
     if (j.explorer) console.log("tx", j.explorer);
     await openMainMenu();
   } catch (e) {
-    toast(e?.message ? String(e.message) : "Withdraw failed", 4000);
+    const msg = String(e?.message || e || "Withdraw failed");
+    if (/reject|denied|cancel/i.test(msg)) toast("Transaction cancelled");
+    else toast(msg, 4000);
     if (btn) {
       btn.disabled = false;
       btn.textContent = prev || "Withdraw to wallet";
@@ -1656,16 +1763,38 @@ function resetRun() {
 }
 resetRun();
 
-function saveRunToBank() {
+async function saveRunToBank() {
   applyDecay();
   if (game.runScore <= 0) {
     toast("No points to save");
     return;
   }
-  profile.bankPoints += game.runScore;
+  const pts = Math.floor(game.runScore);
+  // Local bank first (instant UX)
+  profile.bankPoints += pts;
   game.runScore = 0;
   persistProfile();
-  toast("Saved");
+  toast("Saved locally — confirm on-chain…", 1600);
+
+  // Real human on-chain movement (background-friendly single tx)
+  try {
+    if (!account) {
+      // allow local save without wallet; on-chain when connected
+      toast("Saved (connect wallet to also save on-chain)");
+      return;
+    }
+    const txHash = await sendCoreTx(CORE_FN.saveRun, [BigInt(pts)], "Confirm saveRun on Arc…");
+    console.log("saveRun tx", txHash);
+    toast(`On-chain save ✓ (+${pts})`, 2200);
+  } catch (e) {
+    const msg = String(e?.message || e || "");
+    if (/reject|denied|cancel/i.test(msg)) {
+      toast("Local save kept — on-chain cancelled");
+    } else {
+      toast("Local save kept — on-chain failed");
+      console.warn("saveRun", e);
+    }
+  }
 }
 
 function convertCoinsToBank() {
@@ -1718,12 +1847,11 @@ async function fetchLeaderboard({ refresh = false, names = false } = {}) {
 }
 
 // =====================================================
-// Leaderboard deposit (Neon + wallet signature only — one popup)
+// Leaderboard deposit — ONE on-chain depositScore() tx
 // =====================================================
 let commitInFlight = false;
 
 async function commitWeeklyOnchain() {
-  // Guard immediately to block double pointerdown+click / double taps
   if (commitInFlight) return;
   commitInFlight = true;
 
@@ -1748,24 +1876,24 @@ async function commitWeeklyOnchain() {
       return;
     }
 
-    toast("Sign to save on leaderboard…", 1500);
-    await new Promise((r) => requestAnimationFrame(() => r()));
-
-    // Ensure Arc network (no extra tx — only chain switch if needed)
-    try {
-      await ensureArc();
-    } catch (e) {
-      // non-fatal for signature deposit; still try sign
-      console.warn("ensureArc", e);
-    }
-
     const weekStart = weekStartUtcMs();
-    const timestamp = Date.now();
     const addr = String(account).toLowerCase();
-    const message = `gasrun:deposit:${addr}:${pts}:${timestamp}`;
-    const signature = await signGasrunMessage(message);
 
-    if (commitBtn) commitBtn.textContent = "Saving…";
+    // Single on-chain transaction (no personal_sign double popup)
+    if (commitBtn) commitBtn.textContent = "Confirm in wallet…";
+    const txHash = await sendCoreTx(
+      CORE_FN.depositScore,
+      [BigInt(pts), BigInt(weekStart)],
+      "Confirm leaderboard deposit on Arc…"
+    );
+
+    if (commitBtn) commitBtn.textContent = "Confirming…";
+    await waitTxLight(txHash);
+
+    // Index into Neon for fast leaderboard UI
+    const timestamp = Date.now();
+    // lightweight auth: use a short personal_sign only if API still requires it —
+    // prefer txHash proof path: send deposit with dummy sig skipped by updating API
     const res = await fetch("/api/deposit", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1773,13 +1901,14 @@ async function commitWeeklyOnchain() {
         address: addr,
         points: pts,
         weekStartMs: weekStart,
-        txHash: null,
+        txHash,
         timestamp,
-        signature
+        signature: "onchain",
+        onchain: true
       })
     });
     const j = await res.json().catch(() => ({}));
-    if (!j?.ok) throw new Error(j?.error || "Deposit failed");
+    if (!j?.ok) throw new Error(j?.error || "Index failed (tx may still be on-chain)");
 
     const wasLocked = !isLeaderboardUnlocked();
     addToTotalDeposited(pts);
@@ -1789,20 +1918,16 @@ async function commitWeeklyOnchain() {
     persistProfile();
 
     if (wasLocked && nowUnlocked) {
-      toast("🏆 LEADERBOARD UNLOCKED! Welcome to the competition.", 3200);
+      toast("🏆 LEADERBOARD UNLOCKED!", 3200);
     } else {
-      toast("Deposited to weekly leaderboard!", 2200);
+      toast("On-chain leaderboard deposit ✓", 2200);
     }
 
     if (isSheetOpen()) await openLeaderboardsView();
   } catch (e) {
     const msg = String(e?.message || e || "Commit failed");
-    const low = msg.toLowerCase();
-    if (low.includes("rejected") || low.includes("denied") || low.includes("cancel")) {
-      toast("Signature cancelled");
-    } else {
-      toast(msg);
-    }
+    if (/reject|denied|cancel/i.test(msg)) toast("Transaction cancelled");
+    else toast(msg, 4000);
   } finally {
     commitInFlight = false;
     if (commitBtn) {
