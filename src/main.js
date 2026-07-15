@@ -1718,104 +1718,67 @@ async function fetchLeaderboard({ refresh = false, names = false } = {}) {
 }
 
 // =====================================================
-// On-chain Commit
+// Leaderboard deposit (Neon + wallet signature only — one popup)
 // =====================================================
 let commitInFlight = false;
 
 async function commitWeeklyOnchain() {
-  applyDecay();
-
-  if (!account) {
-    await connectWallet();
-    if (!account) return;
-  }
-
-  const pts = Math.floor(profile.bankPoints);
-  if (pts <= 0) {
-    toast("Bank is empty");
-    return;
-  }
-
+  // Guard immediately to block double pointerdown+click / double taps
   if (commitInFlight) return;
   commitInFlight = true;
 
-  // Give immediate feedback even if the background web3 warmup hasn't finished yet.
   const commitBtn = document.getElementById("btnCommit");
   const prevBtnText = commitBtn ? commitBtn.textContent : "";
   if (commitBtn) {
     commitBtn.disabled = true;
     commitBtn.textContent = "Preparing…";
   }
-  toast("Preparing deposit…", 1200);
-  // Let the UI paint the new button state/toast before heavy module evaluation.
-  await new Promise((r) => requestAnimationFrame(() => r()));
 
   try {
-    await ensureArc();
-    await warmWeb3Deps();
+    applyDecay();
 
-    const p = await getProvider();
-    if (!p) throw new Error("No provider");
-
-    const weekStart = weekStartUtcMs();
-    let txHash = null;
-
-    // Optional on-chain score log when score contract is deployed
-    if (CONTRACT && !CONTRACT.startsWith("0x0000000000000000000000000000000000000000")) {
-      const payload = encodeAbiParameters(
-        [{ type: "uint256" }, { type: "uint256" }],
-        [BigInt(pts), BigInt(weekStart)]
-      );
-      const data = encodeFunctionData({
-        abi: [
-          {
-            type: "function",
-            name: "logAction",
-            stateMutability: "nonpayable",
-            inputs: [
-              { name: "action", type: "bytes32" },
-              { name: "data", type: "bytes" }
-            ],
-            outputs: []
-          }
-        ],
-        functionName: "logAction",
-        args: [ACTION_WEEKLY_ADD, payload]
-      });
-      try {
-        toast("Confirm on-chain deposit…", 1600);
-        txHash = await p.request({
-          method: "eth_sendTransaction",
-          params: [{ from: account, to: CONTRACT, value: "0x0", data }]
-        });
-      } catch (e1) {
-        const low = String(e1?.message || e1 || "").toLowerCase();
-        if (low.includes("rejected") || low.includes("denied")) {
-          toast("Transaction rejected");
-          return;
-        }
-        console.warn("on-chain log skipped", e1);
-      }
+    if (!account) {
+      await connectWallet();
+      if (!account) return;
     }
 
-    // Neon leaderboard deposit (source of truth on Arc)
+    const pts = Math.floor(profile.bankPoints);
+    if (pts <= 0) {
+      toast("Bank is empty");
+      return;
+    }
+
+    toast("Sign to save on leaderboard…", 1500);
+    await new Promise((r) => requestAnimationFrame(() => r()));
+
+    // Ensure Arc network (no extra tx — only chain switch if needed)
+    try {
+      await ensureArc();
+    } catch (e) {
+      // non-fatal for signature deposit; still try sign
+      console.warn("ensureArc", e);
+    }
+
+    const weekStart = weekStartUtcMs();
     const timestamp = Date.now();
-    const message = `gasrun:deposit:${account.toLowerCase()}:${pts}:${timestamp}`;
-    toast("Sign deposit…", 1500);
+    const addr = String(account).toLowerCase();
+    const message = `gasrun:deposit:${addr}:${pts}:${timestamp}`;
     const signature = await signGasrunMessage(message);
+
+    if (commitBtn) commitBtn.textContent = "Saving…";
     const res = await fetch("/api/deposit", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        address: account,
+        address: addr,
         points: pts,
         weekStartMs: weekStart,
-        txHash,
+        txHash: null,
         timestamp,
         signature
       })
     });
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
     if (!j?.ok) throw new Error(j?.error || "Deposit failed");
 
     const wasLocked = !isLeaderboardUnlocked();
@@ -1833,7 +1796,13 @@ async function commitWeeklyOnchain() {
 
     if (isSheetOpen()) await openLeaderboardsView();
   } catch (e) {
-    toast(e?.message ? String(e.message) : "Commit failed");
+    const msg = String(e?.message || e || "Commit failed");
+    const low = msg.toLowerCase();
+    if (low.includes("rejected") || low.includes("denied") || low.includes("cancel")) {
+      toast("Signature cancelled");
+    } else {
+      toast(msg);
+    }
   } finally {
     commitInFlight = false;
     if (commitBtn) {
@@ -2173,18 +2142,11 @@ async function openMainMenu() {
   $("#btnHow").addEventListener("click", openHowView);
 
   const commitBtn = $("#btnCommit");
-  commitBtn.addEventListener(
-    "pointerdown",
-    (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      commitWeeklyOnchain();
-    },
-    { passive: false }
-  );
+  // Single click handler only (pointerdown+click was double-firing wallet popups)
   commitBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
+    if (commitInFlight) return;
     commitWeeklyOnchain();
   });
 
