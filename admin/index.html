@@ -94,8 +94,9 @@
         <div class="okmsg" id="actionMsg"></div>
         <div class="err" id="actionErr"></div>
         <p class="muted" style="margin-top:14px">
-          To fund the vault: send Arc Testnet USDC ERC-20 to the vault address, then approve+deposit via wallet or transfer directly if using transferFrom deposit path.
-          Simple path: transfer USDC to vault address (ERC-20 transfer) — <b>balance()</b> reads token balance, so direct transfer works for liquidity.
+          <b>Fund vault (Arc):</b> send <b>native USDC</b> to the vault address (MetaMask Send / value transfer).
+          On Arc, native USDC = gas token (18 decimals). The vault accepts plain sends via <code>receive()</code>.
+          ERC-20 deposit via <code>deposit()</code> also works. Do <b>not</b> use the old vault if addresses changed.
         </p>
       </div>
     </div>

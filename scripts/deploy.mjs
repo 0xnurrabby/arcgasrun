@@ -88,6 +88,18 @@ async function main() {
   const vaultAddr = await vault.getAddress();
   console.log("GasRunVault:", vaultAddr);
 
+  // Smoke: native receive must work on Arc (empty data + value)
+  try {
+    const fundTx = await wallet.sendTransaction({
+      to: vaultAddr,
+      value: ethers.parseEther("0.01"), // 0.01 native USDC (18 dec)
+    });
+    await fundTx.wait();
+    console.log("Native fund smoke OK:", fundTx.hash);
+  } catch (e) {
+    console.warn("Native fund smoke failed:", e?.message || e);
+  }
+
   const result = {
     chainId: 5042002,
     rpc: ARC_RPC,
