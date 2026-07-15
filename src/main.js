@@ -1166,7 +1166,7 @@ async function convertPointsToUsdc() {
   }
 }
 
-async function withdrawUsdc() {
+async function openWithdrawUsdcView() {
   if (!account) {
     await connectWallet();
     if (!account) return;
@@ -1178,21 +1178,66 @@ async function withdrawUsdc() {
     toast(`Permanent USDC is ${serverUsdcBalance} (need ≥ 0.1). Convert points first.`);
     return;
   }
-  const bal = Number(serverUsdcBalance || 0);
-  const raw = prompt(
-    `Withdraw permanent USDC to wallet (min 0.1, max ${serverUsdcBalance}):`,
-    serverUsdcBalance
+
+  openSheet(
+    "Withdraw USDC",
+    `
+    <div class="menuGrid">
+      <div class="kv"><div class="k">Wallet</div><div class="v">${shortAddr(account)}</div></div>
+      <div class="kv"><div class="k">Permanent USDC</div><div class="v">${serverUsdcBalance}</div></div>
+      <div class="kv"><div class="k">Min withdraw</div><div class="v">0.1 USDC</div></div>
+      <div class="kv"><div class="k">Network</div><div class="v">Arc Testnet</div></div>
+    </div>
+    <label class="fieldLabel" for="wdAmountInput">How much USDC to withdraw?</label>
+    <div class="wdInputRow">
+      <input id="wdAmountInput" class="wdInput" type="number" inputmode="decimal" min="0.1" step="0.1" placeholder="0.1" value="" />
+      <button class="pill" type="button" id="btnWdMax">MAX</button>
+    </div>
+    <div class="btnRow">
+      <button class="pill" type="button" id="btnWdBack">Back</button>
+      <button class="pill primary" type="button" id="btnWdConfirm">Withdraw to wallet</button>
+    </div>
+    <p class="mutedNote">Instant on-chain payout to your connected wallet.</p>
+    `,
+    "withdraw"
   );
-  if (raw == null) return;
-  const amount = Math.round(Number(raw) * 1e6) / 1e6;
+
+  const input = $("#wdAmountInput");
+  if (input) {
+    input.value = "";
+    setTimeout(() => {
+      try { input.focus(); } catch {}
+    }, 50);
+  }
+
+  $("#btnWdMax")?.addEventListener("click", () => {
+    if (input) input.value = String(serverUsdcBalance);
+  });
+  $("#btnWdBack")?.addEventListener("click", () => openMainMenu());
+  $("#btnWdConfirm")?.addEventListener("click", async () => {
+    await confirmWithdrawUsdc(input?.value);
+  });
+}
+
+async function confirmWithdrawUsdc(rawAmount) {
+  await refreshServerBalance();
+  const balMicros = BigInt(serverUsdcMicros || "0");
+  const amount = Math.round(Number(rawAmount) * 1e6) / 1e6;
   if (!Number.isFinite(amount) || amount < MIN_WITHDRAW_USDC) {
-    toast("Invalid amount (min 0.1 USDC)");
+    toast("Enter amount (min 0.1 USDC)");
     return;
   }
   const usdcMicros = String(Math.round(amount * 1_000_000));
   if (BigInt(usdcMicros) > balMicros) {
-    toast(`Amount exceeds permanent balance (${serverUsdcBalance} USDC)`);
+    toast(`Max is ${serverUsdcBalance} USDC`);
     return;
+  }
+
+  const btn = $("#btnWdConfirm");
+  const prev = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Withdrawing…";
   }
 
   try {
@@ -1219,13 +1264,22 @@ async function withdrawUsdc() {
       throw new Error((j?.error || "Withdraw failed") + extra + balHint);
     }
     serverUsdcBalance = j.usdcBalance;
-    serverUsdcMicros = j.usdcBalanceMicros || j.amountMicros || serverUsdcMicros;
+    serverUsdcMicros = j.usdcBalanceMicros || serverUsdcMicros;
     toast(`Withdrawn ${j.amount} USDC ✓`, 2800);
     if (j.explorer) console.log("tx", j.explorer);
-    openMainMenu();
+    await openMainMenu();
   } catch (e) {
     toast(e?.message ? String(e.message) : "Withdraw failed", 4000);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prev || "Withdraw to wallet";
+    }
   }
+}
+
+// keep old name for any callers
+async function withdrawUsdc() {
+  return openWithdrawUsdcView();
 }
 
 // =====================================================
@@ -2115,7 +2169,7 @@ async function openMainMenu() {
     openMainMenu();
   });
   $("#btnToUsdc")?.addEventListener("click", () => convertPointsToUsdc());
-  $("#btnWithdrawUsdc")?.addEventListener("click", () => withdrawUsdc());
+  $("#btnWithdrawUsdc")?.addEventListener("click", () => openWithdrawUsdcView());
   $("#btnHow").addEventListener("click", openHowView);
 
   const commitBtn = $("#btnCommit");
