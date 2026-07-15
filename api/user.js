@@ -1,7 +1,7 @@
 const {
   ensureSchema,
   getSql,
-  getOrCreateUser,
+  getUser,
   normAddr,
   usdcMicrosToDisplay,
   POINTS_PER_USDC,
@@ -10,6 +10,10 @@ const {
 const { ok, fail, cors } = require("./lib/auth");
 const { onChainCredit, getCoreAddress } = require("./lib/chain");
 
+/**
+ * GET balance — does NOT create user / history.
+ * User only appears in admin after convert / withdraw / leaderboard deposit.
+ */
 module.exports = async function handler(req, res) {
   cors(res);
   if (req.method === "OPTIONS") return res.status(204).end();
@@ -21,14 +25,14 @@ module.exports = async function handler(req, res) {
       return fail(res, 400, "Valid address required");
     }
 
-    const user = await getOrCreateUser(address);
+    const user = await getUser(address);
+    let creditMicros = String(user?.usdc_balance_micros || 0);
 
-    // Prefer on-chain permanent USDC credit as source of truth
-    let creditMicros = String(user.usdc_balance_micros || 0);
+    // Read on-chain credit if any, but only UPDATE existing users (never INSERT here)
     try {
       const chain = await onChainCredit(address);
       creditMicros = chain.toString();
-      if (creditMicros !== String(user.usdc_balance_micros || 0)) {
+      if (user && creditMicros !== String(user.usdc_balance_micros || 0)) {
         const db = getSql();
         await db`
           UPDATE users SET usdc_balance_micros = ${creditMicros}, updated_at = NOW()
@@ -39,17 +43,18 @@ module.exports = async function handler(req, res) {
 
     return ok(res, {
       user: {
-        address: user.address,
-        bankPoints: Number(user.bank_points || 0),
+        address,
+        exists: !!user,
+        bankPoints: Number(user?.bank_points || 0),
         usdcBalance: usdcMicrosToDisplay(creditMicros),
         usdcBalanceMicros: creditMicros,
-        totalDepositedPts: Number(user.total_deposited_pts || 0),
-        coins: Number(user.coins || 0),
+        totalDepositedPts: Number(user?.total_deposited_pts || 0),
+        coins: Number(user?.coins || 0),
       },
       rates: {
         pointsPerUsdc: POINTS_PER_USDC,
         minWithdrawUsdc: "0",
-        minWithdrawMicros: "1",
+        minWithdrawMicros: String(MIN_WITHDRAW_MICROS || 1),
       },
       core: getCoreAddress(),
     });

@@ -78,8 +78,24 @@ module.exports = async function handler(req, res) {
         return fail(res, 403, "Admin wallet required", { admin: ADMIN });
       }
 
-      const usersCount = await db`SELECT COUNT(*)::int AS c FROM users`;
-      const totalUsdc = await db`SELECT COALESCE(SUM(usdc_balance_micros),0)::text AS s FROM users`;
+      // Users = only wallets that did real activity (convert / withdraw / LB deposit)
+      const usersCount = await db`
+        SELECT COUNT(*)::int AS c FROM (
+          SELECT address FROM conversions
+          UNION
+          SELECT address FROM withdrawals
+          UNION
+          SELECT address FROM weekly_scores
+        ) active_users
+      `;
+      const totalUsdc = await db`
+        SELECT COALESCE(SUM(usdc_balance_micros),0)::text AS s FROM users
+        WHERE address IN (
+          SELECT address FROM conversions
+          UNION SELECT address FROM withdrawals
+          UNION SELECT address FROM weekly_scores
+        )
+      `;
       const totalWithdrawn = await db`
         SELECT COALESCE(SUM(usdc_micros),0)::text AS s FROM withdrawals WHERE status = 'completed'
       `;
@@ -99,8 +115,14 @@ module.exports = async function handler(req, res) {
         FROM conversions ORDER BY id DESC LIMIT 50
       `;
       const topUsers = await db`
-        SELECT address, bank_points, usdc_balance_micros::text, total_deposited_pts, created_at
-        FROM users ORDER BY usdc_balance_micros DESC LIMIT 50
+        SELECT u.address, u.bank_points, u.usdc_balance_micros::text, u.total_deposited_pts, u.created_at
+        FROM users u
+        WHERE u.address IN (
+          SELECT address FROM conversions
+          UNION SELECT address FROM withdrawals
+          UNION SELECT address FROM weekly_scores
+        )
+        ORDER BY u.usdc_balance_micros DESC LIMIT 50
       `;
       const recentDeposits = await db`
         SELECT id, address, points, week_start_ms, tx_hash, created_at
@@ -114,14 +136,25 @@ module.exports = async function handler(req, res) {
         vBal = "error:" + (e?.message || e);
       }
 
-      // Growth series (last 14 days) for organic charts
-      const userGrowth = await db`
-        SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
-               COUNT(*)::int AS new_users
-        FROM users
-        WHERE created_at > NOW() - INTERVAL '14 days'
-        GROUP BY 1 ORDER BY 1 ASC
+      // First-seen day per active user (first convert OR withdraw OR LB deposit)
+      const firstSeen = await db`
+        SELECT address, MIN(day) AS day FROM (
+          SELECT address, to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day FROM conversions
+          UNION ALL
+          SELECT address, to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day FROM withdrawals
+          UNION ALL
+          SELECT address, to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day FROM weekly_scores
+        ) t GROUP BY address
       `;
+      const byDayNew = {};
+      for (const r of firstSeen) {
+        byDayNew[r.day] = (byDayNew[r.day] || 0) + 1;
+      }
+      const sortedDays = Object.keys(byDayNew).sort();
+      const userGrowth = sortedDays
+        .filter((d) => d >= new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10))
+        .map((day) => ({ day, new_users: byDayNew[day] }));
+
       const wdGrowth = await db`
         SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
                COUNT(*)::int AS count,
@@ -140,18 +173,13 @@ module.exports = async function handler(req, res) {
         ) t GROUP BY day ORDER BY day ASC
       `;
 
-      // cumulative users series
-      const allUserDays = await db`
-        SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
-               COUNT(*)::int AS new_users
-        FROM users
-        GROUP BY 1 ORDER BY 1 ASC
-      `;
       let cum = 0;
-      const cumulativeUsers = allUserDays.map((r) => {
-        cum += Number(r.new_users || 0);
-        return { day: r.day, users: cum, newUsers: Number(r.new_users || 0) };
-      });
+      const cumulativeUsers = sortedDays.map((day) => {
+        cum += byDayNew[day] || 0;
+        return { day, users: cum, newUsers: byDayNew[day] || 0 };
+      }).slice(-14);
+
+      const userGrowthMapped = userGrowth.map((r) => ({ day: r.day, newUsers: r.new_users }));
 
       return ok(res, {
         admin: ADMIN,
@@ -176,8 +204,8 @@ module.exports = async function handler(req, res) {
           vaultBalanceMicros: typeof vBal === "string" && vBal.startsWith("error") ? "0" : vBal,
         },
         charts: {
-          userGrowth: userGrowth.map((r) => ({ day: r.day, newUsers: r.new_users })),
-          cumulativeUsers: cumulativeUsers.slice(-14),
+          userGrowth: userGrowthMapped,
+          cumulativeUsers,
           withdrawals: wdGrowth.map((r) => ({
             day: r.day,
             count: r.count,

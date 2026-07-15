@@ -111,6 +111,18 @@ function usdcMicrosToDisplay(micros) {
   return `${whole}.${frac}`;
 }
 
+/** Read-only: never creates a user row (balance checks must not pollute admin stats) */
+async function getUser(address) {
+  const db = getSql();
+  const addr = normAddr(address);
+  const rows = await db`SELECT * FROM users WHERE address = ${addr}`;
+  return rows[0] || null;
+}
+
+/**
+ * Create user only on real activity (convert / withdraw / leaderboard deposit).
+ * Do NOT call from GET balance endpoints.
+ */
 async function getOrCreateUser(address) {
   const db = getSql();
   const addr = normAddr(address);
@@ -136,5 +148,6 @@ module.exports = {
   MIN_WITHDRAW_MICROS,
   pointsToUsdcMicros,
   usdcMicrosToDisplay,
+  getUser,
   getOrCreateUser,
 };
