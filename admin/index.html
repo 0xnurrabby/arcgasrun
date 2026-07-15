@@ -250,6 +250,33 @@
       return `<span class="pill pend">${s || "pending"}</span>`;
     }
 
+    /** Bangladesh Standard Time (Asia/Dhaka, UTC+6) */
+    function formatBdTime(value) {
+      if (!value) return "—";
+      const d = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(d.getTime())) return String(value);
+      try {
+        return new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Dhaka",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        }).format(d) + " BST";
+      } catch {
+        // Fallback UTC+6 manual
+        const t = new Date(d.getTime() + 6 * 60 * 60 * 1000);
+        const pad = (n) => String(n).padStart(2, "0");
+        let h = t.getUTCHours();
+        const ampm = h >= 12 ? "pm" : "am";
+        h = h % 12 || 12;
+        return `${pad(t.getUTCDate())}/${pad(t.getUTCMonth() + 1)}/${t.getUTCFullYear()}, ${pad(h)}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())} ${ampm} BST`;
+      }
+    }
+
     function render() {
       const s = data.stats || {};
       const c = data.chain || {};
@@ -272,7 +299,7 @@
 
       $("tab-withdrawals").innerHTML = `
         <h3>Recent withdrawals</h3>
-        <table><thead><tr><th>ID</th><th>User</th><th>Amount</th><th>Status</th><th>Tx</th><th>Time</th></tr></thead>
+        <table><thead><tr><th>ID</th><th>User</th><th>Amount</th><th>Status</th><th>Tx</th><th>Time (BD)</th></tr></thead>
         <tbody>${(data.recentWithdrawals || []).map(w => `
           <tr>
             <td>${w.id}</td>
@@ -280,26 +307,26 @@
             <td>${w.amount}</td>
             <td>${pill(w.status)}</td>
             <td>${w.tx_hash ? `<a href="https://testnet.arcscan.app/tx/${w.tx_hash}" target="_blank">tx</a>` : (w.error || "—")}</td>
-            <td>${w.created_at || ""}</td>
+            <td>${formatBdTime(w.created_at)}</td>
           </tr>`).join("") || "<tr><td colspan=6 class='muted'>No withdrawals yet</td></tr>"}
         </tbody></table>`;
 
       $("tab-conversions").innerHTML = `
         <h3>Point → USDC conversions</h3>
-        <table><thead><tr><th>ID</th><th>User</th><th>Points</th><th>USDC</th><th>Time</th></tr></thead>
+        <table><thead><tr><th>ID</th><th>User</th><th>Points</th><th>USDC</th><th>Time (BD)</th></tr></thead>
         <tbody>${(data.recentConversions || []).map(w => `
           <tr>
             <td>${w.id}</td>
             <td class="mono">${w.address}</td>
             <td>${w.points}</td>
             <td>${w.amount}</td>
-            <td>${w.created_at || ""}</td>
+            <td>${formatBdTime(w.created_at)}</td>
           </tr>`).join("") || "<tr><td colspan=5 class='muted'>None yet</td></tr>"}
         </tbody></table>`;
 
       $("tab-deposits").innerHTML = `
         <h3>Weekly leaderboard deposits</h3>
-        <table><thead><tr><th>ID</th><th>User</th><th>Points</th><th>Week</th><th>Tx</th><th>Time</th></tr></thead>
+        <table><thead><tr><th>ID</th><th>User</th><th>Points</th><th>Week</th><th>Tx</th><th>Time (BD)</th></tr></thead>
         <tbody>${(data.recentDeposits || []).map(w => `
           <tr>
             <td>${w.id}</td>
@@ -307,19 +334,19 @@
             <td>${w.points}</td>
             <td>${w.week_start_ms}</td>
             <td class="mono">${w.tx_hash || "—"}</td>
-            <td>${w.created_at || ""}</td>
+            <td>${formatBdTime(w.created_at)}</td>
           </tr>`).join("") || "<tr><td colspan=6 class='muted'>None yet</td></tr>"}
         </tbody></table>`;
 
       $("tab-users").innerHTML = `
         <h3>Top users by USDC balance</h3>
-        <table><thead><tr><th>Address</th><th>USDC bal</th><th>Deposited pts</th><th>Joined</th></tr></thead>
+        <table><thead><tr><th>Address</th><th>USDC bal</th><th>Deposited pts</th><th>Joined (BD)</th></tr></thead>
         <tbody>${(data.topUsers || []).map(u => `
           <tr>
             <td class="mono">${u.address}</td>
             <td>${u.usdcBalance}</td>
             <td>${u.total_deposited_pts}</td>
-            <td>${u.created_at || ""}</td>
+            <td>${formatBdTime(u.created_at)}</td>
           </tr>`).join("") || "<tr><td colspan=4 class='muted'>No users</td></tr>"}
         </tbody></table>`;
 
