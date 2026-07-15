@@ -114,6 +114,45 @@ module.exports = async function handler(req, res) {
         vBal = "error:" + (e?.message || e);
       }
 
+      // Growth series (last 14 days) for organic charts
+      const userGrowth = await db`
+        SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+               COUNT(*)::int AS new_users
+        FROM users
+        WHERE created_at > NOW() - INTERVAL '14 days'
+        GROUP BY 1 ORDER BY 1 ASC
+      `;
+      const wdGrowth = await db`
+        SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+               COUNT(*)::int AS count,
+               COALESCE(SUM(usdc_micros),0)::text AS volume_micros
+        FROM withdrawals
+        WHERE status = 'completed' AND created_at > NOW() - INTERVAL '14 days'
+        GROUP BY 1 ORDER BY 1 ASC
+      `;
+      const actGrowth = await db`
+        SELECT day, SUM(n)::int AS actions FROM (
+          SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day, COUNT(*)::int AS n FROM conversions WHERE created_at > NOW() - INTERVAL '14 days' GROUP BY 1
+          UNION ALL
+          SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day, COUNT(*)::int AS n FROM weekly_scores WHERE created_at > NOW() - INTERVAL '14 days' GROUP BY 1
+          UNION ALL
+          SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day, COUNT(*)::int AS n FROM withdrawals WHERE created_at > NOW() - INTERVAL '14 days' GROUP BY 1
+        ) t GROUP BY day ORDER BY day ASC
+      `;
+
+      // cumulative users series
+      const allUserDays = await db`
+        SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+               COUNT(*)::int AS new_users
+        FROM users
+        GROUP BY 1 ORDER BY 1 ASC
+      `;
+      let cum = 0;
+      const cumulativeUsers = allUserDays.map((r) => {
+        cum += Number(r.new_users || 0);
+        return { day: r.day, users: cum, newUsers: Number(r.new_users || 0) };
+      });
+
       return ok(res, {
         admin: ADMIN,
         chain: {
@@ -135,6 +174,16 @@ module.exports = async function handler(req, res) {
             ? vBal
             : usdcMicrosToDisplay(vBal),
           vaultBalanceMicros: typeof vBal === "string" && vBal.startsWith("error") ? "0" : vBal,
+        },
+        charts: {
+          userGrowth: userGrowth.map((r) => ({ day: r.day, newUsers: r.new_users })),
+          cumulativeUsers: cumulativeUsers.slice(-14),
+          withdrawals: wdGrowth.map((r) => ({
+            day: r.day,
+            count: r.count,
+            volume: usdcMicrosToDisplay(r.volume_micros),
+          })),
+          activity: actGrowth.map((r) => ({ day: r.day, actions: r.actions })),
         },
         recentWithdrawals: recentWd.map((r) => ({
           ...r,

@@ -38,6 +38,10 @@
     .tabs button.active { background:var(--accent); color:#041018; }
     .hidden { display:none; }
     a { color:var(--accent); }
+    .chart-wrap { background:#0d1424; border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:14px; }
+    .chart-wrap h4 { margin:0 0 8px; font-size:.9rem; color:var(--accent); }
+    .chart-wrap canvas { width:100%; height:200px; display:block; }
+    .chart-note { color:var(--muted); font-size:.78rem; margin-top:6px; }
   </style>
 </head>
 <body>
@@ -70,14 +74,16 @@
       </div>
 
       <div class="tabs">
-        <button class="active" data-tab="withdrawals">Withdrawals</button>
+        <button class="active" data-tab="growth">Growth charts</button>
+        <button data-tab="withdrawals">Withdrawals</button>
         <button data-tab="conversions">Conversions</button>
         <button data-tab="deposits">Leaderboard deposits</button>
         <button data-tab="users">Users</button>
         <button data-tab="actions">Vault actions</button>
       </div>
 
-      <div id="tab-withdrawals" class="card"></div>
+      <div id="tab-growth" class="card"></div>
+      <div id="tab-withdrawals" class="card hidden"></div>
       <div id="tab-conversions" class="card hidden"></div>
       <div id="tab-deposits" class="card hidden"></div>
       <div id="tab-users" class="card hidden"></div>
@@ -297,6 +303,39 @@
         Explorer: <a href="https://testnet.arcscan.app/address/${c.vault}" target="_blank" rel="noreferrer">vault on ArcScan</a>
       `;
 
+      // Growth charts (screenshot-friendly for Twitter)
+      const ch = data.charts || {};
+      $("tab-growth").innerHTML = `
+        <h3>Organic growth (last 14 days)</h3>
+        <p class="muted" style="margin:0 0 12px">Screenshot-ready charts · Bangladesh-friendly daily view</p>
+        <div class="chart-wrap">
+          <h4>Cumulative users ↗</h4>
+          <canvas id="chartUsers" width="900" height="200"></canvas>
+          <div class="chart-note">Total registered players over time</div>
+        </div>
+        <div class="chart-wrap">
+          <h4>New users / day</h4>
+          <canvas id="chartNew" width="900" height="200"></canvas>
+          <div class="chart-note">Daily signups</div>
+        </div>
+        <div class="chart-wrap">
+          <h4>Withdrawals / day</h4>
+          <canvas id="chartWd" width="900" height="200"></canvas>
+          <div class="chart-note">Completed cashouts count</div>
+        </div>
+        <div class="chart-wrap">
+          <h4>On-app activity / day</h4>
+          <canvas id="chartAct" width="900" height="200"></canvas>
+          <div class="chart-note">Converts + leaderboard deposits + withdraws</div>
+        </div>
+      `;
+      requestAnimationFrame(() => {
+        drawLineChart("chartUsers", (ch.cumulativeUsers || []).map((d) => ({ x: d.day, y: d.users })), "#4cc9f0");
+        drawBarChart("chartNew", (ch.userGrowth || []).map((d) => ({ x: d.day, y: d.newUsers })), "#06d6a0");
+        drawBarChart("chartWd", (ch.withdrawals || []).map((d) => ({ x: d.day, y: d.count })), "#f7d046");
+        drawBarChart("chartAct", (ch.activity || []).map((d) => ({ x: d.day, y: d.actions })), "#9b5de5");
+      });
+
       $("tab-withdrawals").innerHTML = `
         <h3>Recent withdrawals</h3>
         <table><thead><tr><th>ID</th><th>User</th><th>Amount</th><th>Status</th><th>Tx</th><th>Time (BD)</th></tr></thead>
@@ -353,13 +392,104 @@
       $("wdTo").value = $("wdTo").value || account;
     }
 
+    function drawLineChart(id, points, color) {
+      const c = document.getElementById(id);
+      if (!c) return;
+      const ctx = c.getContext("2d");
+      const W = c.width, H = c.height;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#0d1424";
+      ctx.fillRect(0, 0, W, H);
+      if (!points.length) {
+        ctx.fillStyle = "#8b97b3";
+        ctx.font = "14px sans-serif";
+        ctx.fillText("No data yet — organic growth will appear here", 20, H / 2);
+        return;
+      }
+      const pad = 28;
+      const ys = points.map((p) => p.y);
+      const minY = 0;
+      const maxY = Math.max(1, ...ys);
+      ctx.strokeStyle = "#243049";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 4; i++) {
+        const y = pad + ((H - pad * 2) * i) / 3;
+        ctx.beginPath();
+        ctx.moveTo(pad, y);
+        ctx.lineTo(W - pad, y);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      points.forEach((p, i) => {
+        const x = pad + (i / Math.max(1, points.length - 1)) * (W - pad * 2);
+        const y = H - pad - ((p.y - minY) / (maxY - minY || 1)) * (H - pad * 2);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      // fill under
+      ctx.lineTo(pad + (W - pad * 2), H - pad);
+      ctx.lineTo(pad, H - pad);
+      ctx.closePath();
+      ctx.fillStyle = color + "33";
+      ctx.fill();
+      ctx.fillStyle = "#8b97b3";
+      ctx.font = "11px monospace";
+      ctx.fillText(String(points[0].x || ""), pad, H - 8);
+      ctx.fillText(String(points[points.length - 1].x || ""), W - 90, H - 8);
+      ctx.fillStyle = color;
+      ctx.font = "bold 13px sans-serif";
+      ctx.fillText(String(ys[ys.length - 1]), W - 70, pad);
+    }
+
+    function drawBarChart(id, points, color) {
+      const c = document.getElementById(id);
+      if (!c) return;
+      const ctx = c.getContext("2d");
+      const W = c.width, H = c.height;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#0d1424";
+      ctx.fillRect(0, 0, W, H);
+      if (!points.length) {
+        ctx.fillStyle = "#8b97b3";
+        ctx.font = "14px sans-serif";
+        ctx.fillText("No data yet", 20, H / 2);
+        return;
+      }
+      const pad = 28;
+      const maxY = Math.max(1, ...points.map((p) => p.y));
+      const bw = (W - pad * 2) / points.length;
+      points.forEach((p, i) => {
+        const h = ((p.y / maxY) * (H - pad * 2)) || 0;
+        const x = pad + i * bw + bw * 0.15;
+        const y = H - pad - h;
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, bw * 0.7, h);
+      });
+      ctx.fillStyle = "#8b97b3";
+      ctx.font = "11px monospace";
+      ctx.fillText(String(points[0].x || ""), pad, H - 8);
+      ctx.fillText(String(points[points.length - 1].x || ""), W - 90, H - 8);
+    }
+
     document.querySelectorAll(".tabs button").forEach((btn) => {
       btn.addEventListener("click", () => {
         document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
-        ["withdrawals","conversions","deposits","users","actions"].forEach((t) => {
+        ["growth","withdrawals","conversions","deposits","users","actions"].forEach((t) => {
           $("tab-" + t).classList.toggle("hidden", t !== btn.dataset.tab);
         });
+        if (btn.dataset.tab === "growth" && data) {
+          const ch = data.charts || {};
+          requestAnimationFrame(() => {
+            drawLineChart("chartUsers", (ch.cumulativeUsers || []).map((d) => ({ x: d.day, y: d.users })), "#4cc9f0");
+            drawBarChart("chartNew", (ch.userGrowth || []).map((d) => ({ x: d.day, y: d.newUsers })), "#06d6a0");
+            drawBarChart("chartWd", (ch.withdrawals || []).map((d) => ({ x: d.day, y: d.count })), "#f7d046");
+            drawBarChart("chartAct", (ch.activity || []).map((d) => ({ x: d.day, y: d.actions })), "#9b5de5");
+          });
+        }
       });
     });
 
